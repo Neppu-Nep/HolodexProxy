@@ -126,15 +126,17 @@ async function check_twitch(channelIds) {
         const data = await response.text();
 
         if (data.includes("isLiveBroadcast")) {
+            let firstPart = data.substring(data.indexOf('<script type="application/ld+json">') + 35);
+            let parsedData = JSON.parse(firstPart.substring(0, firstPart.indexOf("</script>")))[0];
             finalResponse.push({
                 id: "1234",
-                title: channelName,
+                title: parsedData.description,
                 type: "placeholder",
-                available_at: new Date().toISOString(),
+                available_at: parsedData.publication.startDate,
                 duration: 0,
                 status: "live",
-                start_scheduled: new Date().toISOString(),
-                start_actual: new Date().toISOString(),
+                start_scheduled: parsedData.publication.startDate,
+                start_actual: parsedData.publication.startDate,
                 channel: {
                     id: channelId,
                     name: channelName,

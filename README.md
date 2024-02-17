@@ -47,3 +47,6 @@ Extra: To change subdomain, go to "Workers & Pages", Overview, and click on chan
 6. Save the script and refresh the page.
 
 Note: You can skip step 4, 5, and 6 if you are okay with the default icons.
+
+## Known Issues
+- Twitch channels might not end correctly since the info scraped from the channel page is not consistent and I don't want to use the Twitch API just for this. If you have a better solution, please open an issue or a pull request.
