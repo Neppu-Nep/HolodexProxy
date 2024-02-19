@@ -40,7 +40,12 @@
 
     function attachThumbWatcher() {
         let domElement = document.getElementsByClassName("videos-bar")[0];
-        let subObserver = new window.MutationObserver((e) => {
+        if (!domElement) {
+            window.setTimeout(attachThumbWatcher, 500);
+            return;
+        }
+
+        let Observer = new window.MutationObserver((e) => {
             let children = domElement.children;
             for (let i = 0; i < children.length; i++) {
                 let img = children[i].getElementsByTagName("img")[0];
@@ -55,21 +60,10 @@
                 }
             }
         });
-        subObserver.observe(domElement, {
+        Observer.observe(domElement, {
             childList: true
         });
     }
-
-    const observer = new MutationObserver(mutations => {
-        if (document.getElementsByClassName("videos-bar")) {
-            observer.disconnect();
-            setTimeout(attachThumbWatcher, 100);
-        }
-    });
-
-    observer.observe(document.body, {
-        childList: true,
-        subtree: true
-    });
+    attachThumbWatcher();
 
 })();

@@ -72,7 +72,7 @@ async function check_yT(channelIds, YOUTUBE_API_KEY) {
             title: item.snippet.title,
             type: "stream",
             published_at: item.snippet.publishedAt,
-            available_at: item.snippet.publishedAt,
+            available_at: item.liveStreamingDetails.scheduledStartTime,
             duration: 0,
             status: "live",
             start_scheduled: item.liveStreamingDetails.scheduledStartTime,
@@ -93,14 +93,14 @@ async function check_yT(channelIds, YOUTUBE_API_KEY) {
   
     for (const item of UpcomingJSONResponse) {
         let result = {
-            id: item.id.videoId,
+            id: item.id,
             title: item.snippet.title,
             type: "stream",
             published_at: item.snippet.publishedAt,
-            available_at: item.snippet.publishedAt,
+            available_at: item.liveStreamingDetails.scheduledStartTime,
             duration: 0,
             status: "upcoming",
-            start_scheduled: item.snippet.publishedAt,
+            start_scheduled: item.liveStreamingDetails.scheduledStartTime,
             live_viewers: 0,
             channel: {
                 id: item.snippet.channelId,
