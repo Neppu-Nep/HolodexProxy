@@ -125,7 +125,15 @@ async function check_twitch(channelIds) {
         const response = await fetch(twitch_url);
         const data = await response.text();
 
+        let thumb_url = `https://static-cdn.jtvnw.net/previews-ttv/live_user_${channelId}-1920x1080.jpg`;
+
         if (data.includes("isLiveBroadcast")) {
+
+            const thumb_data = await fetch(thumb_url);
+            if (thumb_data.redirected) {
+                return;
+            }
+
             let firstPart = data.substring(data.indexOf('<script type="application/ld+json">') + 35);
             let parsedData = JSON.parse(firstPart.substring(0, firstPart.indexOf("</script>")))[0];
             finalResponse.push({
@@ -148,7 +156,7 @@ async function check_twitch(channelIds) {
                 },
                 link: `https://twitch.tv/${channelId}`,
                 certainty: "certain",
-                thumbnail: `https://static-cdn.jtvnw.net/previews-ttv/live_user_${channelId}-1920x1080.jpg`,
+                thumbnail: thumb_url,
                 placeholderType: "external-stream",
             });
         }
