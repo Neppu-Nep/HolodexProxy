@@ -27,23 +27,33 @@ This project **does not** add the channels to Holodex's database. It only adds t
 6. Go to "Settings", "Variables", and add a new variable with the name `YOUTUBE_API` and the value of your YouTube Data API key from earlier.
 7. Save the full URL of your worker for later. It should look something like `your_subdomain.your_username.workers.dev`.
 
-Extra: To change subdomain, go to "Workers & Pages", Overview, and click on change subdomain.
+Extra: To change subdomain, go to "Workers & Pages", "Overview", and click on "Change subdomain".
 
 ### Tampermonkey
 1. Install the Tampermonkey extension for your browser.
 2. Go to the dashboard and click on the "Create a new script" button.
 3. Copy the code from `userscript.js` into the editor.
-4. Change the `proxyURL` variable to the URL of your Cloudflare worker.
+4. Change the `proxyURL` variable to the URL of your Cloudflare worker. (Example: `https://your_subdomain.your_username.workers.dev`)
 5. Save the script.
 
 ## Usage
 1. Get the channel ID of the channel you want to add.
     - For YouTube, you can get it by going to the channel, "About", Scroll down, "Share Channel", and "Copy Channel ID".
     - For Twitch, it's the last part of the URL. Example: `https://www.twitch.tv/`**channel_id**.
-2. Login to your Cloudflare account and go to your created worker. Press "Quick Edit". Add the respective channel ID to either `YTChannels` or `TwitchChannels`. For Twitch, it would be a list of strings. The first string is the channel ID and the second string is the channel name. Example: `["channel_id", "channel_name"]`.
-3. Save and Deploy the worker.
-4. Grab an icon thumbnail link for the channel. Usually, you can just use the image address of the channel's profile picture for both YouTube and Twitch.
-5. In your browser, open extension list, click on Tampermonkey, Dashboard, and go to the script you created earlier. Edit the script and add the channel ID and icon link to the `THUMBNAIL_MAP` array.
-6. Save the script and refresh the page.
+2. Grab an icon thumbnail link for the channel. Usually, you can just use the image of the channel's profile picture for both YouTube and Twitch.
+3. Go to Tampermonkey, Dashboard, and edit the script you created earlier. (Should be named "Custom Holodex Proxy")
+4. Add a new entry in `ChannelInfos` with the name of your choice, the channel ID, thumbnail link and the platform. 
 
-Note: You can skip step 4, 5, and 6 if you are okay with the default icons.
+Example: 
+```
+{
+    "channel_name": {
+        "id": "channel_id",
+        "thumbnail": "thumbnail_link",
+        "platform": "youtube" // or "twitch"
+    }
+}
+```
+5. Save user script and refresh the holodex page. The channel should now show up in the live and upcoming streams list if it exists.
+
+Note: You can input empty string for thumbnail link if you are okay with the default icons.

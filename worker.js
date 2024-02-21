@@ -5,34 +5,32 @@ export default {
         headers.set('Access-Control-Allow-Origin', 'https://holodex.net');
         headers.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
         headers.set('Access-Control-Allow-Headers', 'Content-Type');
-        headers.set('Cache-Control', 'max-age=900');
-  
-        if (!request.url.includes("api/v2/users/live")) {
+        headers.set('Cache-Control', 'max-age=600');
+
+        if (request.method === "OPTIONS") {
+            return new Response("OK", { headers: headers });
+        }
+        else if (request.method !== "POST") {
+            return new Response("Method not allowed", { status: 405 });
+        }
+
+        if (!request.url.includes("api/getChannels")) {
             return new Response("Not found", { status: 404 });
         }
-  
-        const YOUTUBE_API_KEY = env.YOUTUBE_API;
-        let YTChannels = [
-            "UC1uzMZ7x_Hgun5t8J9uFanw", // BriAtCookiebox
-        ];
 
-        let TwitchChannels = [
-            // ["channelId", "channelName"]
-            ["hexavt", "HexaVT"],
-            ["nanobites", "Nanobites"],
-            ["uwoslab", "UWO's Lab"],
-        ];
-  
-        let yTResponse = await check_yT(YTChannels, YOUTUBE_API_KEY);
-        let twitchResponse = await check_twitch(TwitchChannels);
-  
+        const postBody = await request.json();
+        const YOUTUBE_API_KEY = env.YOUTUBE_API;
+
+        const yTResponse = await check_yT(postBody.ytChannels, YOUTUBE_API_KEY);
+        const twitchResponse = await check_twitch(postBody.twitchChannels);
+
         let finalResponse = [];
         finalResponse = finalResponse.concat(yTResponse);
         finalResponse = finalResponse.concat(twitchResponse);
 
         return new Response(JSON.stringify(finalResponse), { headers: headers });
     }
-  };
+};
   
 async function check_yT(channelIds, YOUTUBE_API_KEY) {
   
@@ -44,7 +42,7 @@ async function check_yT(channelIds, YOUTUBE_API_KEY) {
   
     await Promise.all(channelIds.map(async (channelId) => {
         let playlistId = "UULV" + channelId.substring(2);
-        let api_url = `https://youtube.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=10&playlistId=${playlistId}&key=${YOUTUBE_API_KEY}`;
+        let api_url = `https://youtube.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=7&playlistId=${playlistId}&key=${YOUTUBE_API_KEY}`;
         const response = await fetch(api_url);
         const data = await response.json();
 
@@ -52,6 +50,10 @@ async function check_yT(channelIds, YOUTUBE_API_KEY) {
             videoIds.push(item.snippet.resourceId.videoId);
         }
     }));
+
+    if (videoIds.length == 0) {
+        return finalResponse;
+    }
 
     let videoUrl = `https://www.googleapis.com/youtube/v3/videos?part=snippet,liveStreamingDetails&maxResults=50&id=${videoIds.join(",")}&key=${YOUTUBE_API_KEY}`;
     const videoResponse = await fetch(videoUrl);
