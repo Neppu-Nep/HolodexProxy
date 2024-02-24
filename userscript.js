@@ -3,6 +3,7 @@
 // @version      2024-02-23
 // @description  Proxy for Holodex to add user-specified channels from youtube and twitch
 // @author       Nep
+// @connect      twitch.tv
 // @match        https://holodex.net/*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=holodex.net
 // @grant        GM_xmlhttpRequest
@@ -148,14 +149,27 @@
       
         return finalResponse;
     }
+
+    async function GM_fetch(url) {
+        return new Promise((resolve, reject) => {
+            GM_xmlhttpRequest({
+                method: "GET",
+                url: url,
+                onload: (response) => {
+                    resolve(response.responseText);
+                },
+                onerror: (error) => {
+                    reject(error);
+                }
+            });
+        });
+    }
       
     async function checkTwitch(channelIds) {
         let finalResponse = [];
         await Promise.all(channelIds.map(async ([channelId, channelName]) => {
             console.log(`[Holodex Proxy] Fetching twitch data for ${channelId}`);
-            const twitch_url = `https://api.allorigins.win/raw?url=${encodeURIComponent(`https://twitch.tv/${channelId}`)}`; // Using allorigins to bypass CORS
-            const response = await fetch(twitch_url);
-            const data = await response.text();
+            const data = await GM_fetch(`https://twitch.tv/${channelId}`);
     
             let thumb_url = `https://static-cdn.jtvnw.net/previews-ttv/live_user_${channelId}-1920x1080.jpg`;
     
