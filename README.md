@@ -7,7 +7,6 @@ This is a project that allows you to add any YouTube or Twitch channel that aren
 This project **does not** add the channels to Holodex's database. It only adds the channel to your personal Holodex favorite list on your browser. This means that the channel will only show up on your browser and not on other devices or browsers.
 
 ## Requirements
-- Cloudflare Worker account - [link](https://workers.cloudflare.com/)
 - YouTube Data API v3 key - [link](https://console.developers.google.com/)
 - Tampermoney - [link](https://www.tampermonkey.net/)
 
@@ -18,22 +17,11 @@ This project **does not** add the channels to Holodex's database. It only adds t
 4. Go to the "APIs & Services" > "Credentials" and create a new API key.
 5. Copy the API key and save it for later.
 
-### Cloudflare Worker
-1. Register an account on Cloudflare Workers and verify your email.
-2. Go to Workers & Pages, Overview, and click "Create Worker".
-3. Choose a name for your worker. This name will be used in the URL of your proxy.
-4. Click on "Edit Code" and paste the code from `worker.js` into the editor.
-5. Click "Save and Deploy".
-6. Go to "Settings", "Variables", and add a new variable with the name `YOUTUBE_API` and the value of your YouTube Data API key from earlier.
-7. Save the full URL of your worker for later. It should look something like `your_subdomain.your_username.workers.dev`.
-
-Extra: To change subdomain, go to "Workers & Pages", "Overview", and click on "Change subdomain".
-
 ### Tampermonkey
 1. Install the Tampermonkey extension for your browser.
 2. Go to the dashboard and click on the "Create a new script" button.
 3. Copy the code from `userscript.js` into the editor.
-4. Change the `proxyURL` variable to the URL of your Cloudflare worker. (Example: `https://your_subdomain.your_username.workers.dev`)
+4. Change the `YOUTUBE_API_KEY` variable to the API key you got from the YouTube Data API v3.
 5. Save the script.
 
 ## Usage

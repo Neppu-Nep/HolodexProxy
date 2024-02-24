@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Custom Holodex Proxy
-// @version      2024-02-20
+// @version      2024-02-23
 // @description  Proxy for Holodex to add user-specified channels from youtube and twitch
 // @author       Nep
 // @match        https://holodex.net/*
@@ -8,8 +8,10 @@
 // @grant        GM_xmlhttpRequest
 // ==/UserScript==
 
-(function() {
-    const proxyUrl = "https://proxy.temp.sample";
+(async function() {
+
+    const DELAY_BETWEEN_UPDATES = 5 * 60 * 1000; // 5 minute
+    const YOUTUBE_API_KEY = ""; // Add your youtube API key here (Careful with this, don't share your API key)
     const ChannelInfos = {
         "BriAtCookiebox": {
             "id": "UC1uzMZ7x_Hgun5t8J9uFanw",
@@ -33,39 +35,176 @@
         }
     };
 
-    let postBody = {
-        ytChannels: [],
-        twitchChannels: []
-    };
-
-    for (let key in ChannelInfos) {
-        if (ChannelInfos[key].platform === "youtube") {
-            postBody.ytChannels.push(ChannelInfos[key].id);
-        } else if (ChannelInfos[key].platform === "twitch") {
-            postBody.twitchChannels.push([ChannelInfos[key].id, key]);
-        }
-    }
-    const requestUrl = `${proxyUrl}/api/getChannels`;
+    unsafeWindow.extraData = [];
 
     let oldXHROpen = window.XMLHttpRequest.prototype.open;
     window.XMLHttpRequest.prototype.open = function(method, url, async, user, password) {
-        if (url.toString().includes("holodex.net/api/v2/users/live")) {
+        if (url.toString().includes("/api/v2/users/live")) {
             this.addEventListener("readystatechange", function() {
                 if (this.readyState === 4) {
                     let oldResponse = JSON.parse(this.responseText);
                     Object.defineProperty(this, 'response', {writable: true});
                     Object.defineProperty(this, 'responseText', {writable: true});
-                    let request = new XMLHttpRequest();
-                    request.open("POST", requestUrl, false);
-                    request.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-                    request.send(JSON.stringify(postBody));
-                    let response = JSON.parse(request.responseText);
-                    let finalResponse = oldResponse.concat(response);
-                    this.response = this.responseText = JSON.stringify(finalResponse);
+
+                    let newResponse = oldResponse.concat(unsafeWindow.extraData);
+                    this.response = this.responseText = JSON.stringify(newResponse);
                 }
             });
         }
+
         return oldXHROpen.apply(this, arguments);
+    };
+
+    async function checkYt(channelIds, YOUTUBE_API_KEY) {
+
+        if (YOUTUBE_API_KEY === "") {
+            console.error("[Holodex Proxy] Youtube API key is not set. Skipping youtube data fetch.");
+            return [];
+        }
+  
+        let LiveJSONResponse = [];
+        let UpcomingJSONResponse = [];
+        let finalResponse = [];
+    
+        let videoIds = [];
+      
+        await Promise.all(channelIds.map(async (channelId) => {
+            console.log(`[Holodex Proxy] Fetching youtube data for ${channelId}`);
+            let playlistId = "UULV" + channelId.substring(2);
+            let api_url = `https://youtube.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=7&playlistId=${playlistId}&key=${YOUTUBE_API_KEY}`;
+            const response = await fetch(api_url);
+            const data = await response.json();
+    
+            for (const item of data.items) {
+                videoIds.push(item.snippet.resourceId.videoId);
+            }
+        }));
+    
+        if (videoIds.length == 0) {
+            return finalResponse;
+        }
+    
+        let videoUrl = `https://www.googleapis.com/youtube/v3/videos?part=snippet,liveStreamingDetails&maxResults=50&id=${videoIds.join(",")}&key=${YOUTUBE_API_KEY}`;
+        const videoResponse = await fetch(videoUrl);
+        const videoData = await videoResponse.json();
+    
+        for (const item of videoData.items) {
+            if (item.snippet.liveBroadcastContent === "live") {
+                LiveJSONResponse.push(item);
+            }
+            else if (item.snippet.liveBroadcastContent === "upcoming") {
+                UpcomingJSONResponse.push(item);
+            }
+        }
+      
+        for (const item of LiveJSONResponse) {
+            let result = {
+                id: item.id,
+                title: item.snippet.title,
+                type: "stream",
+                published_at: item.snippet.publishedAt,
+                available_at: item.liveStreamingDetails.scheduledStartTime,
+                duration: 0,
+                status: "live",
+                start_scheduled: item.liveStreamingDetails.scheduledStartTime,
+                start_actual: item.liveStreamingDetails.actualStartTime,
+                live_viewers: item.liveStreamingDetails.concurrentViewers,
+                channel: {
+                    id: item.snippet.channelId,
+                    name: item.snippet.channelTitle,
+                    org: "Independents",
+                    suborg: "",
+                    type: "vtuber",
+                    photo: "",
+                    english_name: item.snippet.channelTitle,
+                }
+            };
+            finalResponse.push(result);
+        }
+      
+        for (const item of UpcomingJSONResponse) {
+            let result = {
+                id: item.id,
+                title: item.snippet.title,
+                type: "stream",
+                published_at: item.snippet.publishedAt,
+                available_at: item.liveStreamingDetails.scheduledStartTime,
+                duration: 0,
+                status: "upcoming",
+                start_scheduled: item.liveStreamingDetails.scheduledStartTime,
+                live_viewers: 0,
+                channel: {
+                    id: item.snippet.channelId,
+                    name: item.snippet.channelTitle,
+                    org: "Independents",
+                    suborg: "",
+                    type: "vtuber",
+                    photo: "",
+                    english_name: item.snippet.channelTitle,
+                }
+            };
+            finalResponse.push(result);
+        }
+      
+        return finalResponse;
+    }
+      
+    async function checkTwitch(channelIds) {
+        let finalResponse = [];
+        await Promise.all(channelIds.map(async ([channelId, channelName]) => {
+            console.log(`[Holodex Proxy] Fetching twitch data for ${channelId}`);
+            const twitch_url = `https://api.allorigins.win/raw?url=${encodeURIComponent(`https://twitch.tv/${channelId}`)}`; // Using allorigins to bypass CORS
+            const response = await fetch(twitch_url);
+            const data = await response.text();
+    
+            let thumb_url = `https://static-cdn.jtvnw.net/previews-ttv/live_user_${channelId}-1920x1080.jpg`;
+    
+            if (data.includes("isLiveBroadcast")) {
+    
+                const thumb_data = await fetch(thumb_url);
+                if (thumb_data.redirected) {
+                    return;
+                }
+    
+                let firstPart = data.substring(data.indexOf('<script type="application/ld+json">') + 35);
+                let parsedData = JSON.parse(firstPart.substring(0, firstPart.indexOf("</script>")))[0];
+                finalResponse.push({
+                    id: "1234",
+                    title: parsedData.description,
+                    type: "placeholder",
+                    available_at: parsedData.publication.startDate,
+                    duration: 0,
+                    status: "live",
+                    start_scheduled: parsedData.publication.startDate,
+                    start_actual: parsedData.publication.startDate,
+                    channel: {
+                        id: channelId,
+                        name: channelName,
+                        org: "Independents",
+                        suborg: "",
+                        type: "vtuber",
+                        photo: "",
+                        english_name: channelName,
+                    },
+                    link: `https://twitch.tv/${channelId}`,
+                    certainty: "certain",
+                    thumbnail: thumb_url,
+                    placeholderType: "external-stream",
+                });
+            }
+        }));
+        return finalResponse;
+    }
+
+    async function updateData() {
+        const ytChannels = Object.keys(ChannelInfos).filter(key => ChannelInfos[key].platform === "youtube").map(key => ChannelInfos[key].id);
+        const twitchChannels = Object.keys(ChannelInfos).filter(key => ChannelInfos[key].platform === "twitch").map(key => [key, ChannelInfos[key].id]);
+
+        let ytData = await checkYt(ytChannels, YOUTUBE_API_KEY);
+        let twitchData = await checkTwitch(twitchChannels);
+
+        unsafeWindow.extraData = ytData.concat(twitchData);
+        setTimeout(updateData, DELAY_BETWEEN_UPDATES);
     }
 
     function attachThumbWatcher() {
@@ -94,6 +233,8 @@
             childList: true
         });
     }
+
     attachThumbWatcher();
+    await updateData();
 
 })();
