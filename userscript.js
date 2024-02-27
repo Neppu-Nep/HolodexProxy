@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Custom Holodex Proxy
-// @version      0.1
+// @version      0.2
 // @description  Proxy for Holodex to add user-specified channels from youtube and twitch
 // @author       Nep
 // @connect      twitch.tv
@@ -62,33 +62,33 @@
             console.error("[Holodex Proxy] Youtube API key is not set. Skipping youtube data fetch.");
             return [];
         }
-  
+
         let LiveJSONResponse = [];
         let UpcomingJSONResponse = [];
         let finalResponse = [];
-    
+
         let videoIds = [];
-      
+
         await Promise.all(channelIds.map(async (channelId) => {
             console.log(`[Holodex Proxy] Fetching youtube data for ${channelId}`);
             let playlistId = "UULV" + channelId.substring(2);
             let api_url = `https://youtube.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=7&playlistId=${playlistId}&key=${YOUTUBE_API_KEY}`;
             const response = await fetch(api_url);
             const data = await response.json();
-    
+
             for (const item of data.items) {
                 videoIds.push(item.snippet.resourceId.videoId);
             }
         }));
-    
+
         if (videoIds.length == 0) {
             return finalResponse;
         }
-    
+
         let videoUrl = `https://www.googleapis.com/youtube/v3/videos?part=snippet,liveStreamingDetails&maxResults=50&id=${videoIds.join(",")}&key=${YOUTUBE_API_KEY}`;
         const videoResponse = await fetch(videoUrl);
         const videoData = await videoResponse.json();
-    
+
         for (const item of videoData.items) {
             if (item.snippet.liveBroadcastContent === "live") {
                 LiveJSONResponse.push(item);
@@ -97,7 +97,7 @@
                 UpcomingJSONResponse.push(item);
             }
         }
-      
+
         for (const item of LiveJSONResponse) {
             let result = {
                 id: item.id,
@@ -122,7 +122,7 @@
             };
             finalResponse.push(result);
         }
-      
+
         for (const item of UpcomingJSONResponse) {
             let result = {
                 id: item.id,
@@ -146,7 +146,7 @@
             };
             finalResponse.push(result);
         }
-      
+
         return finalResponse;
     }
 
@@ -164,7 +164,7 @@
             });
         });
     }
-      
+
     async function checkTwitch(channelIds) {
         let finalResponse = [];
         await Promise.all(channelIds.map(async ([channelId, channelName]) => {
@@ -212,7 +212,7 @@
 
     async function updateData() {
         const ytChannels = Object.keys(ChannelInfos).filter(key => ChannelInfos[key].platform === "youtube").map(key => ChannelInfos[key].id);
-        const twitchChannels = Object.keys(ChannelInfos).filter(key => ChannelInfos[key].platform === "twitch").map(key => [key, ChannelInfos[key].id]);
+        const twitchChannels = Object.keys(ChannelInfos).filter(key => ChannelInfos[key].platform === "twitch").map(key => [ChannelInfos[key].id, key]);
 
         let ytData = await checkYt(ytChannels, YOUTUBE_API_KEY);
         let twitchData = await checkTwitch(twitchChannels);
