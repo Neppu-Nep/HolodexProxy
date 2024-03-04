@@ -1,10 +1,12 @@
 # Holodex Proxy
 
-### This project isn't affiliated with Holodex. Please open an issue here if you have any problems with the project.
+### This project isn't affiliated with Holodex. Please open an issue here or join the support discord below if you have any problems with the project.
 
 This is a project that allows you to add any YouTube or Twitch channel that aren't on Holodex to Holodex favorite list for live and upcoming streams. 
 
 This project **does not** add the channels to Holodex's database. It only adds the channel to your personal Holodex favorite list on your browser. This means that the channel will only show up on your browser and not on other devices or browsers.
+
+Support Discord: [link](https://discord.gg/cm4kyTsrPS)
 
 ## Requirements
 - YouTube Data API v3 key - [link](https://console.developers.google.com/)
