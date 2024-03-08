@@ -32,15 +32,15 @@ Support Discord: [link](https://discord.gg/cm4kyTsrPS)
     - For Twitch, it's the last part of the URL. Example: `https://www.twitch.tv/`**channel_id**.
 2. Grab an icon thumbnail link for the channel. Usually, you can just use the image of the channel's profile picture for both YouTube and Twitch.
 3. Go to Tampermonkey, Dashboard, and edit the script you created earlier. (Should be named "Custom Holodex Proxy")
-4. Add a new entry in `ChannelInfos` with the name of your choice, the channel ID, thumbnail link and the platform. 
+4. Add a new entry in `ChannelInfos` with the name of your choice, and the channel's thumbnail link, YouTube channel ID, and/or Twitch channel ID.
 
 Example: 
 ```
 {
     "channel_name": {
-        "id": "channel_id",
         "thumbnail": "thumbnail_link",
-        "platform": "youtube" // or "twitch"
+        "youtube": "yt_channel_id",
+        "twitch": "twitch_channel_id"
     }
 }
 ```
