@@ -93,6 +93,11 @@
     
             for (const item of videoData.items) {
                 const isLive = item.snippet.liveBroadcastContent;
+
+                if (isLive === "none") {
+                    continue;
+                }
+
                 let result = {
                     id: item.id,
                     title: item.snippet.title,
