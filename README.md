@@ -38,6 +38,7 @@ Example:
 ```
 {
     "channel_name": {
+        "twitter": "twitter_username", // Optional (Just for linking on channel page)
         "thumbnail": "thumbnail_link",
         "youtube": "yt_channel_id",
         "twitch": "twitch_channel_id"
