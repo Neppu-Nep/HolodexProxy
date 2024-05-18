@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Custom Holodex Proxy
-// @version      0.4
+// @version      0.4.1
 // @description  Proxy for Holodex to add user-specified channels from youtube and twitch
 // @author       Nep
 // @connect      twitch.tv
@@ -44,7 +44,7 @@
         }
     };
 
-    unsafeWindow.HolodexProxyDetails = localStorage.getItem("HolodexProxyDetails") ? JSON.parse(localStorage.getItem("HolodexProxyDetails")) : {streamsData: [], channelsData: {}, lastUpdate: 0};
+    unsafeWindow.HolodexProxyDetails = localStorage.getItem("HolodexProxyDetails") ? JSON.parse(localStorage.getItem("HolodexProxyDetails")) : {streamsData: [], channelsData: {}, lastStreamDataUpdate: 0, lastChannelDataUpdate: 0};
     let oldXHROpen = window.XMLHttpRequest.prototype.open;
 
     window.XMLHttpRequest.prototype.open = function(method, url, async, user, password) {
@@ -92,8 +92,21 @@
                     let favData = [];
                     for (let key in ChannelInfos) {
                         if (ChannelInfos[key].youtube in unsafeWindow.HolodexProxyDetails.channelsData) {
-                            favData.push(unsafeWindow.HolodexProxyDetails.channelsData[ChannelInfos[key].youtube].channelData);
-                            continue;
+                            const channelData = unsafeWindow.HolodexProxyDetails.channelsData[ChannelInfos[key].youtube].channelData;
+                            favData.push({
+                                id: channelData.id,
+                                name: channelData.name,
+                                english_name: channelData.english_name,
+                                photo: channelData.photo,
+                                type: channelData.type,
+                                subscriber_count: channelData.subscriber_count,
+                                video_count: channelData.video_count,
+                                clip_count: channelData.clip_count,
+                                twitter: channelData.twitter,
+                                org: channelData.org,
+                                inactive: channelData.inactive,
+                                group: channelData.group
+                            })
                         }
                     }
                     newResponse = oldResponse.concat(favData);
@@ -313,25 +326,28 @@
     }
 
     async function updateData() {
-        console.log("[Holodex Proxy] Updating stream data");
-        const ytChannels = Object.keys(ChannelInfos).filter(key => Object.keys(ChannelInfos[key]).includes("youtube")).map(key => ChannelInfos[key].youtube);
-        const twitchChannels = Object.keys(ChannelInfos).filter(key => Object.keys(ChannelInfos[key]).includes("twitch")).map(key => [ChannelInfos[key].twitch, key]);
 
-        let ytData = await checkYt(ytChannels, YOUTUBE_API_KEY);
-        let twitchData = await checkTwitch(twitchChannels);
+        if (Date.now() - unsafeWindow.HolodexProxyDetails.lastStreamDataUpdate > DELAY_BETWEEN_UPDATES) {
+            console.log("[Holodex Proxy] Updating stream data");
+            const ytChannels = Object.keys(ChannelInfos).filter(key => Object.keys(ChannelInfos[key]).includes("youtube")).map(key => ChannelInfos[key].youtube);
+            const twitchChannels = Object.keys(ChannelInfos).filter(key => Object.keys(ChannelInfos[key]).includes("twitch")).map(key => [ChannelInfos[key].twitch, key]);
 
-        unsafeWindow.HolodexProxyDetails.streamsData = ytData.concat(twitchData);
-        localStorage.setItem("HolodexProxyDetails", JSON.stringify(unsafeWindow.HolodexProxyDetails));
+            let ytData = await checkYt(ytChannels, YOUTUBE_API_KEY);
+            let twitchData = await checkTwitch(twitchChannels);
 
-        if (Object.keys(unsafeWindow.HolodexProxyDetails.channelsData).length === 0 || Date.now() - unsafeWindow.HolodexProxyDetails.lastUpdate > 1000 * 60 * 60 * 24 * 7) { // 1 week
+            unsafeWindow.HolodexProxyDetails.streamsData = ytData.concat(twitchData);
+            unsafeWindow.HolodexProxyDetails.lastStreamDataUpdate = Date.now();
+            localStorage.setItem("HolodexProxyDetails", JSON.stringify(unsafeWindow.HolodexProxyDetails));
+        }
+
+        if (Object.keys(unsafeWindow.HolodexProxyDetails.channelsData).length === 0 || Date.now() - unsafeWindow.HolodexProxyDetails.lastChannelDataUpdate > 1000 * 60 * 60 * 24 * 7) { // 1 week
             console.log("[Holodex Proxy] Refreshing extra details data");
-            unsafeWindow.HolodexProxyDetails.lastUpdate = Date.now();
             let channelExtraData = {};
 
             for (let key in ChannelInfos) {
                 if (ChannelInfos[key].youtube) {
                     console.log(`[Holodex Proxy] Fetching youtube extra data for ${key} (${ChannelInfos[key].youtube})`);
-                    let response = await fetch(`https://www.googleapis.com/youtube/v3/channels?part=contentDetails,id,snippet,statistics&id=${ChannelInfos[key].youtube}&key=${YOUTUBE_API_KEY}`);
+                    let response = await fetch(`https://www.googleapis.com/youtube/v3/channels?part=contentDetails,id,snippet,statistics,brandingSettings&id=${ChannelInfos[key].youtube}&key=${YOUTUBE_API_KEY}`);
                     let data = await response.json();
                     channelExtraData[ChannelInfos[key].youtube] = {
                         id: ChannelInfos[key].youtube,
@@ -339,6 +355,8 @@
                         english_name: data.items[0].snippet.title,
                         description: data.items[0].snippet.description,
                         photo: data.items[0].snippet.thumbnails.default.url,
+                        thumbnail: null,
+                        banner: data.items[0].brandingSettings.image ? data.items[0].brandingSettings.image.bannerExternalUrl : "",
                         org: "Independents",
                         suborg: "",
                         lang: null,
@@ -372,6 +390,7 @@
                 let videoData = await checkYt([key], YOUTUBE_API_KEY, false, 48);
                 unsafeWindow.HolodexProxyDetails.channelsData[key].videos = videoData;
             }
+            unsafeWindow.HolodexProxyDetails.lastChannelDataUpdate = Date.now();
             localStorage.setItem("HolodexProxyDetails", JSON.stringify(unsafeWindow.HolodexProxyDetails));
         }
 
