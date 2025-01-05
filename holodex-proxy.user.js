@@ -1,12 +1,14 @@
 // ==UserScript==
 // @name         Custom Holodex Proxy
-// @version      0.5.1
+// @version      0.6
 // @description  Proxy for Holodex to add user-specified channels from youtube and twitch
 // @author       Nep
 // @connect      twitch.tv
 // @match        https://holodex.net/*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=holodex.net
 // @grant        GM_xmlhttpRequest
+// @updateURL    https://raw.githubusercontent.com/Neppu-Nep/HolodexProxy/refs/heads/main/holodex-proxy.user.js
+// @downloadURL  https://raw.githubusercontent.com/Neppu-Nep/HolodexProxy/refs/heads/main/holodex-proxy.user.js
 // @run-at       document-start
 // ==/UserScript==
 
@@ -46,11 +48,13 @@
     };
 
     async function initDetails() {
-        const version = 0.52;
+        const version = 0.6;
         let config = null;
         if (localStorage.getItem("HolodexProxyDetails")) {
             config = JSON.parse(localStorage.getItem("HolodexProxyDetails"));
         }
+
+        HolodexProxyVideoTemp = [];
 
         if (!config) {
             config = {streamsData: [], channelsData: {}, lastStreamDataUpdate: 0, lastChannelDataUpdate: 0, version: version};
@@ -202,9 +206,9 @@
         return oldXHROpen.apply(this, arguments);
     };
 
-    async function fetchYtVideosData(videoIds, YOUTUBE_API_KEY, mode = "stream") {
+    async function fetchYtVideosData(videoIds, api_key, mode = "stream") {
 
-        if (YOUTUBE_API_KEY === "") {
+        if (api_key === "") {
             console.error("[Holodex Proxy] Youtube API key is not set. Skipping youtube data fetch.");
             return [];
         }
@@ -213,7 +217,7 @@
         for (let i = 0; i < videoIds.length; i += 50) {
 
             const chunk = videoIds.slice(i, i + 50);
-            const videoUrl = `https://www.googleapis.com/youtube/v3/videos?part=snippet,liveStreamingDetails,contentDetails&id=${chunk.join(",")}&key=${YOUTUBE_API_KEY}`;
+            const videoUrl = `https://www.googleapis.com/youtube/v3/videos?part=snippet,liveStreamingDetails,contentDetails&id=${chunk.join(",")}&key=${api_key}`;
             const videoResponse = await fetch(videoUrl);
             const videoData = await videoResponse.json();
 
@@ -271,9 +275,9 @@
 
     }
 
-    async function checkYt(channelIds, YOUTUBE_API_KEY, limit = true, count = 7, mode = "stream") {
+    async function checkYt(channelIds, api_key, limit = true, count = 7, mode = "stream") {
 
-        if (YOUTUBE_API_KEY === "") {
+        if (api_key === "") {
             console.error("[Holodex Proxy] Youtube API key is not set. Skipping youtube data fetch.");
             return [];
         }
@@ -294,7 +298,7 @@
 
             try {
                 while (true) {
-                    const playlistUrl = `https://youtube.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=${count}&playlistId=${playlistId}&key=${YOUTUBE_API_KEY}${nextPageToken ? `&pageToken=${nextPageToken}` : ""}`;
+                    const playlistUrl = `https://youtube.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=${count}&playlistId=${playlistId}&key=${api_key}${nextPageToken ? `&pageToken=${nextPageToken}` : ""}`;
                     const response = await fetch(playlistUrl);
                     const data = await response.json();
 
@@ -315,7 +319,7 @@
             return finalResponse;
         }
 
-        finalResponse = await fetchYtVideosData(videoIds, YOUTUBE_API_KEY, mode);
+        finalResponse = await fetchYtVideosData(videoIds, api_key, mode);
         return finalResponse;
     }
 
@@ -475,53 +479,58 @@
                 }
 
                 console.log(`[Holodex Proxy] Data for ${key} (${youtubeKey}) is probably outdated. Fetching new data.`);
-                let response = await fetch(`https://www.googleapis.com/youtube/v3/channels?part=contentDetails,id,snippet,statistics,brandingSettings&id=${youtubeKey}&key=${YOUTUBE_API_KEY}`);
-                let data = await response.json();
-                let currentChannelNewData = {
-                    id: youtubeKey,
-                    name: data.items[0].snippet.title,
-                    english_name: data.items[0].snippet.title,
-                    description: data.items[0].snippet.description,
-                    photo: data.items[0].snippet.thumbnails.default.url,
-                    thumbnail: null,
-                    banner: data.items[0].brandingSettings.image ? data.items[0].brandingSettings.image.bannerExternalUrl : "",
-                    org: "Independents",
-                    suborg: "",
-                    lang: null,
-                    published_at: data.items[0].snippet.publishedAt,
-                    view_count: data.items[0].statistics.viewCount,
-                    video_count: data.items[0].statistics.videoCount,
-                    subscriber_count: data.items[0].statistics.subscriberCount,
-                    comments_crawled_at: "",
-                    updated_at: new Date().toISOString(),
-                    recrawled_at: new Date().toISOString(),
-                    yt_uploads_id: data.items[0].contentDetails.relatedPlaylists.uploads,
-                    crawled_at: "",
-                    type: "vtuber",
-                    clip_count: 0,
-                    twitter: ChannelInfos[key].twitter || "",
-                    inactive: false,
-                    created_at: "",
-                    top_topics: [],
-                    yt_handle: [data.items[0].snippet.customUrl],
-                    twitch: ChannelInfos[key].twitch || null,
-                    yt_name_history: [],
-                    groups: ""
+                if (YOUTUBE_API_KEY === "") {
+                    console.error("[Holodex Proxy] Youtube API key is not set. Skipping youtube data fetch.");
                 }
+                else {
+                    let response = await fetch(`https://www.googleapis.com/youtube/v3/channels?part=contentDetails,id,snippet,statistics,brandingSettings&id=${youtubeKey}&key=${YOUTUBE_API_KEY}`);
+                    let data = await response.json();
+                    let currentChannelNewData = {
+                        id: youtubeKey,
+                        name: data.items[0].snippet.title,
+                        english_name: data.items[0].snippet.title,
+                        description: data.items[0].snippet.description,
+                        photo: data.items[0].snippet.thumbnails.default.url,
+                        thumbnail: null,
+                        banner: data.items[0].brandingSettings.image ? data.items[0].brandingSettings.image.bannerExternalUrl : "",
+                        org: "Independents",
+                        suborg: "",
+                        lang: null,
+                        published_at: data.items[0].snippet.publishedAt,
+                        view_count: data.items[0].statistics.viewCount,
+                        video_count: data.items[0].statistics.videoCount,
+                        subscriber_count: data.items[0].statistics.subscriberCount,
+                        comments_crawled_at: "",
+                        updated_at: new Date().toISOString(),
+                        recrawled_at: new Date().toISOString(),
+                        yt_uploads_id: data.items[0].contentDetails.relatedPlaylists.uploads,
+                        crawled_at: "",
+                        type: "vtuber",
+                        clip_count: 0,
+                        twitter: ChannelInfos[key].twitter || "",
+                        inactive: false,
+                        created_at: "",
+                        top_topics: [],
+                        yt_handle: [data.items[0].snippet.customUrl],
+                        twitch: ChannelInfos[key].twitch || null,
+                        yt_name_history: [],
+                        groups: ""
+                    }
 
-                unsafeWindow.HolodexProxyDetails.channelsData[youtubeKey].channelData = currentChannelNewData;
+                    unsafeWindow.HolodexProxyDetails.channelsData[youtubeKey].channelData = currentChannelNewData;
 
-                const modes = {
-                    "videos": "UULF",
-                    "stream": "UULV",
-                    "membersonly": "UUMO",
-                    "shorts": "UUSH",
-                }
-                for (const mode in modes) {
-                    const videoData = await checkYt([youtubeKey], YOUTUBE_API_KEY, false, currentChannelNewData.video_count, mode);
-                    unsafeWindow.HolodexProxyDetails.channelsData[youtubeKey].videos = videoData.concat(unsafeWindow.HolodexProxyDetails.channelsData[youtubeKey].videos);
-                    unsafeWindow.HolodexProxyDetails.channelsData[youtubeKey].videos = unsafeWindow.HolodexProxyDetails.channelsData[youtubeKey].videos.filter((video, index, self) => self.findIndex(v => v.id === video.id) === index);
-                    await new Promise(r => setTimeout(r, 5000));
+                    const modes = {
+                        "videos": "UULF",
+                        "stream": "UULV",
+                        "membersonly": "UUMO",
+                        "shorts": "UUSH",
+                    }
+                    for (const mode in modes) {
+                        const videoData = await checkYt([youtubeKey], YOUTUBE_API_KEY, false, currentChannelNewData.video_count, mode);
+                        unsafeWindow.HolodexProxyDetails.channelsData[youtubeKey].videos = videoData.concat(unsafeWindow.HolodexProxyDetails.channelsData[youtubeKey].videos);
+                        unsafeWindow.HolodexProxyDetails.channelsData[youtubeKey].videos = unsafeWindow.HolodexProxyDetails.channelsData[youtubeKey].videos.filter((video, index, self) => self.findIndex(v => v.id === video.id) === index);
+                        await new Promise(r => setTimeout(r, 5000));
+                    }
                 }
                 unsafeWindow.HolodexProxyDetails.channelsData[youtubeKey].videos = unsafeWindow.HolodexProxyDetails.channelsData[youtubeKey].videos.sort((a, b) => new Date(b.available_at) - new Date(a.available_at));
 
@@ -581,7 +590,7 @@
                 }
             }
         }
-    }).observe(document.body, { childList: true, subtree: true });
+    }).observe(document.documentElement, { childList: true, subtree: true });
 
     await updateData();
     unsafeWindow.updateData = updateData;
