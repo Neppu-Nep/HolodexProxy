@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Custom Holodex Proxy
-// @version      0.7.0
+// @version      0.7.1
 // @description  Proxy for Holodex to add user-specified channels from youtube and twitch
 // @author       Nep
 // @connect      twitch.tv
@@ -378,7 +378,7 @@
             }
             .hp-modal-content {
                 background-color: #2d3748; color: #e2e8f0; margin: auto; padding: 20px;
-                border: 1px solid #4a5568; border-radius: 8px; width: 80%; max-width: 700px;
+                border: 1px solid #4a5568; border-radius: 8px; width: 80%;
                 max-height: 90vh; overflow-y: auto; position: relative;
             }
             .hp-close-btn {
