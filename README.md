@@ -11,6 +11,7 @@ Support Discord: [link](https://discord.gg/cm4kyTsrPS)
 ## Requirements
 - YouTube Data API v3 key - [link](https://console.developers.google.com/)
 - Tampermoney - [link](https://www.tampermonkey.net/)
+- Violentmonkey - [link](https://violentmonkey.github.io/get-it/)
 
 ### YouTube Data API v3
 1. Go to the [Google Cloud Console](https://console.developers.google.com/).
@@ -19,32 +20,21 @@ Support Discord: [link](https://discord.gg/cm4kyTsrPS)
 4. Go to the "APIs & Services" > "Credentials" and create a new API key.
 5. Copy the API key and save it for later.
 
-### Tampermonkey
-1. Install the Tampermonkey extension for your browser.
-2. Go to the dashboard and click on the "Create a new script" button.
-3. Copy the code from `userscript.js` into the editor.
-4. Change the `YOUTUBE_API_KEY` variable to the API key you got from the YouTube Data API v3.
-5. Save the script.
+### Tampermonkey/Violentmonkey
+1. Install the Tampermonkey/Violentmonkey extension for your browser.
+2. Click on `holodex-proxy.user.js` in the root of this repository.
+3. Then click on "Raw" to install the script.
 
 ## Usage
-1. Get the channel ID of the channel you want to add.
-    - For YouTube, you can get it by going to the channel, "About", Scroll down, "Share Channel", and "Copy Channel ID".
-    - For Twitch, it's the last part of the URL. Example: `https://www.twitch.tv/`**channel_id**.
-2. Grab an icon thumbnail link for the channel. Usually, you can just use the image of the channel's profile picture for both YouTube and Twitch.
-3. Go to Tampermonkey, Dashboard, and edit the script you created earlier. (Should be named "Custom Holodex Proxy")
-4. Add a new entry in `ChannelInfos` with the name of your choice, and the channel's thumbnail link, YouTube channel ID, and/or Twitch channel ID.
-
-Example: 
-```
-{
-    "channel_name": {
-        "twitter": "twitter_username", // Optional (Just for linking on channel page)
-        "thumbnail": "thumbnail_link",
-        "youtube": "yt_channel_id",
-        "twitch": "twitch_channel_id"
-    }
-}
-```
-5. Save user script and refresh the holodex page. The channel should now show up in the live and upcoming streams list if it exists.
-
-Note: You can input empty string for thumbnail link if you are okay with the default icons.
+1. Go to the [Holodex](https://holodex.net/).
+2. Click on your extension icon and click on the "Holodex Proxy Settings" button.
+3. Paste the YouTube Data API v3 key you created earlier into the input box.
+4. You can add new channels by clicking on the "Add Channel" button.
+    - Display name: The name of the channel that will be displayed on Holodex.
+    - Twitter: The Twitter username of the channel. This is optional and is just for linking on the channel page.
+    - Thumbnail: The thumbnail link of the channel. You can use the channel's profile picture link or leave it empty for the default icon.
+    - YouTube Channel ID: The channel ID of the YouTube channel. You can get it by going to the channel, "About", Scroll down, "Share Channel", and "Copy Channel ID".
+    - Twitch Channel ID: The channel ID of the Twitch channel. It's the last part of the URL. Example: `https://www.twitch.tv/`**channel_id**.
+    - Click on "Save Channel Change" to save the channel.
+5. Click on the "Save & Apply Settings" button to save the settings.
+6. Refresh the Holodex page to see the changes.
