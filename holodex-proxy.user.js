@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Custom Holodex Proxy
-// @version      0.7.1
+// @version      0.7.2
 // @description  Proxy for Holodex to add user-specified channels from youtube and twitch
 // @author       Nep
 // @connect      twitch.tv
@@ -17,16 +17,16 @@
 // @run-at       document-start
 // ==/UserScript==
 
-(async function() {
+(async function () {
     'use strict';
 
     // --- Default Configuration (Used if no settings saved) ---
     const DEFAULT_SETTINGS = {
-        youtubeApiKey: "", // User needs to add their key
+        youtubeApiKey: "", // YouTube Data API v3 Key
         updateOneChannelAtATime: true, // Update all channels at once or one at a time
         upcomingUpdateDelayMinutes: 10,
         channelDataUpdateDelayHours: 1,
-        channelInfos: { // Original Default Example Channels
+        channelInfos: {
             // YouTube Only
             "Tencho": {
                 "twitter": "dantencho",
@@ -113,7 +113,7 @@
                     <label for="hp-update-one-channel">Update One Channel at a Time:</label>
                     <input type="checkbox" id="hp-update-one-channel" ${settings.updateOneChannelAtATime ? 'checked' : ''}>
                 </div>
-                <small style="display: block; margin-top: 5px;">When enabled, only one channel will be updated at a time. This is useful for large channel lists.</small>
+                <small style="display: block; margin-top: 5px;">When enabled, only one channel will be updated at a time during the regular background update cycle. This is useful for large channel lists. Forced refreshes update immediately.</small>
 
                 <hr>
                 <h3>Managed Channels</h3>
@@ -150,6 +150,11 @@
 
                 <hr>
                 <div class="hp-modal-buttons">
+                    <div style="float: left;">
+                         <button type="button" id="hp-export-settings-btn" title="Export current settings to a JSON file">Export</button>
+                         <button type="button" id="hp-import-settings-btn" title="Import settings from a JSON file">Import</button>
+                         <input type="file" id="hp-import-file-input" style="display: none;" accept=".json">
+                    </div>
                     <button type="button" id="hp-save-settings-btn">Save & Apply Settings</button>
                     <button type="button" id="hp-cancel-settings-btn">Close</button>
                 </div>
@@ -176,6 +181,9 @@
         const closeBtn = modal.querySelector('.hp-close-btn');
         const apiKeyInput = modal.querySelector('#hp-api-key');
         const toggleApiKeyBtn = modal.querySelector('#hp-toggle-api-key');
+        const exportBtn = modal.querySelector('#hp-export-settings-btn');
+        const importBtn = modal.querySelector('#hp-import-settings-btn');
+        const importFileInput = modal.querySelector('#hp-import-file-input');
 
 
         function renderModalChannelList() {
@@ -205,29 +213,73 @@
             const tbody = table.querySelector('tbody');
             for (const name in modalChannelInfos) {
                 const info = modalChannelInfos[name];
+                const youtubeId = info.youtube || null;
                 const tr = document.createElement('tr');
-                // Use optional chaining for safety, provide 'N/A' fallback
                 tr.innerHTML = `
                     <td>${name}</td>
-                    <td>${info?.twitter || 'N/A'}</td>
-                    <td>${info?.youtube || 'N/A'}</td>
-                    <td>${info?.twitch || 'N/A'}</td>
+                    <td>${info.twitter || 'N/A'}</td>
+                    <td>${youtubeId || 'N/A'}</td>
+                    <td>${info.twitch || 'N/A'}</td>
                     <td>
-                        <button class="hp-edit-channel-btn" data-key="${name}">Edit</button>
-                        <button class="hp-delete-channel-btn" data-key="${name}">Delete</button>
+                        <button class="hp-refresh-channel-btn" data-key="${name}" ${!youtubeId ? 'disabled title="Refresh requires a YouTube ID"' : 'title="Force refresh channel & video data"'}>Refresh</button>
+                        <button class="hp-edit-channel-btn" data-key="${name}" title="Edit channel details">Edit</button>
+                        <button class="hp-delete-channel-btn" data-key="${name}" title="Remove channel from configuration">Delete</button>
                     </td>
                 `;
                 tbody.appendChild(tr);
             }
             listDiv.appendChild(table);
 
-            // Add event listeners for edit/delete buttons within this modal's scope
+            // Add event listeners for buttons within this modal's scope
+            listDiv.querySelectorAll('.hp-refresh-channel-btn').forEach(btn => {
+                btn.addEventListener('click', () => handleForceRefreshClick(btn));
+            });
             listDiv.querySelectorAll('.hp-edit-channel-btn').forEach(btn => {
                 btn.addEventListener('click', () => showModalAddEditForm(btn.dataset.key));
             });
             listDiv.querySelectorAll('.hp-delete-channel-btn').forEach(btn => {
                 btn.addEventListener('click', () => deleteModalChannel(btn.dataset.key));
             });
+        }
+
+        async function handleForceRefreshClick(button) {
+            const key = button.dataset.key;
+            const channelInfo = modalChannelInfos[key];
+            const youtubeId = channelInfo?.youtube;
+
+            if (!youtubeId) {
+                alert("Cannot refresh: This channel does not have a YouTube ID configured.");
+                return;
+            }
+
+            if (!YOUTUBE_API_KEY) {
+                alert("Cannot refresh: YouTube API Key is not set in settings.");
+                return;
+            }
+
+            button.disabled = true;
+            button.textContent = 'Refreshing...';
+            button.title = 'Refresh in progress...';
+
+            console.log(`[Holodex Proxy] Force refreshing channel: ${key} (${youtubeId})`);
+            try {
+                await updateSingleChannelData(youtubeId, key, true);
+                alert(`Successfully refreshed data for channel: ${key}`);
+                console.log(`[Holodex Proxy] Force refresh complete for channel: ${key}`);
+                // Update the global temp video cache and save after refresh
+                await rebuildTempVideoCache();
+                saveCacheToLocalStorage();
+            }
+            catch (error) {
+                alert(`Error refreshing channel ${key}. Check the console for details.`);
+                console.error(`[Holodex Proxy] Error during force refresh for channel ${key}:`, error);
+            }
+            finally {
+                // Re-enable the button regardless of success/failure
+                button.disabled = false;
+                button.textContent = 'Refresh';
+                button.title = 'Force refresh channel & video data';
+            }
         }
 
         function showModalAddEditForm(key = null) {
@@ -242,7 +294,8 @@
                 twitchInput.value = data.twitch || '';
                 nameInput.disabled = true; // Prevent changing the key/display name when editing
 
-            } else { // Adding new
+            }
+            else { // Adding new
                 formTitle.textContent = 'Add New Channel';
                 editKeyInput.value = '';
                 nameInput.value = '';
@@ -271,7 +324,7 @@
 
             if (!name) {
                 alert('Display Name is required.');
-                return; 
+                return;
             }
 
             if (!youtube && !twitch) {
@@ -292,20 +345,18 @@
                 twitch: twitch || undefined
             };
 
-            // We are modifying the modal's temporary copy (modalChannelInfos)
-            // Since name editing is disabled, no need to delete old key
-            modalChannelInfos[name] = channelData; // Add or update in the temporary copy
+            modalChannelInfos[name] = channelData;
 
-            renderModalChannelList(); // Re-render list in modal
+            renderModalChannelList();
             hideModalAddEditForm();
-            console.log(`[Holodex Proxy] Channel "${name}" added or changed.`);
+            console.log(`[Holodex Proxy] Channel "${name}" added or changed locally in modal.`);
         }
 
         function deleteModalChannel(key) {
-            if (confirm(`Are you sure you want to delete the channel "${key}" from the configuration?`)) {
-                delete modalChannelInfos[key]; // Delete from the temporary copy
-                renderModalChannelList(); // Re-render list in modal
-                console.log(`[Holodex Proxy] Channel "${key}" deleted.`);
+            if (confirm(`Are you sure you want to delete the channel "${key}" from the configuration? This will take effect when you save settings.`)) {
+                delete modalChannelInfos[key];
+                renderModalChannelList();
+                console.log(`[Holodex Proxy] Channel "${key}" marked for deletion locally in modal.`);
             }
         }
 
@@ -358,11 +409,66 @@
                 console.log("[Holodex Proxy] Settings saved and applied to runtime.");
                 alert("Settings saved and applied.");
                 modal.remove();
-                updateData(true); // Trigger an update check immediately after saving
+                updateData(); // Trigger an update check immediately after saving
             } catch (e) {
                 console.error("[Holodex Proxy] Error saving settings:", e);
                 alert("Error saving settings. See console for details.");
             }
+        });
+
+        exportBtn.addEventListener('click', () => {
+            const currentModalSettings = {
+                youtubeApiKey: "",
+                updateOneChannelAtATime: modal.querySelector('#hp-update-one-channel').checked,
+                upcomingUpdateDelayMinutes: parseInt(modal.querySelector('#hp-upcoming-delay').value, 10),
+                channelDataUpdateDelayHours: parseInt(modal.querySelector('#hp-channel-delay').value, 10),
+                channelInfos: modalChannelInfos
+            };
+
+            const blob = new Blob([JSON.stringify(currentModalSettings, null, 2)], { type: "application/json" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = "holodex-proxy-settings.json";
+            document.body.appendChild(a); // Append to body to ensure click works in all browsers
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        });
+
+        importBtn.addEventListener('click', () => {
+            importFileInput.click();
+        });
+
+        importFileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                try {
+                    const importedSettings = JSON.parse(event.target.result);
+
+                    // Basic validation/Application
+                    if (importedSettings.youtubeApiKey !== undefined) apiKeyInput.value = importedSettings.youtubeApiKey;
+                    if (importedSettings.updateOneChannelAtATime !== undefined) modal.querySelector('#hp-update-one-channel').checked = !!importedSettings.updateOneChannelAtATime;
+                    if (importedSettings.upcomingUpdateDelayMinutes !== undefined) modal.querySelector('#hp-upcoming-delay').value = importedSettings.upcomingUpdateDelayMinutes;
+                    if (importedSettings.channelDataUpdateDelayHours !== undefined) modal.querySelector('#hp-channel-delay').value = importedSettings.channelDataUpdateDelayHours;
+
+                    if (importedSettings.channelInfos && typeof importedSettings.channelInfos === 'object') {
+                        modalChannelInfos = importedSettings.channelInfos;
+                        renderModalChannelList();
+                    }
+
+                    alert("Settings loaded from file! Review them and click 'Save & Apply Settings' to persist.");
+                } 
+                catch (err) {
+                    console.error("[Holodex Proxy] Import Error:", err);
+                    alert("Failed to import settings. Invalid JSON file.");
+                }
+                importFileInput.value = ''; // Reset input to allow re-importing same file if needed
+            };
+            reader.readAsText(file);
         });
 
         // Initial population of the channel list in the modal
@@ -391,55 +497,112 @@
             .hp-form-group input[type="text"], .hp-form-group input[type="password"],
             .hp-form-group input[type="number"], .hp-form-group input[type="url"] {
                 width: calc(100% - 22px); padding: 10px; background-color: #4a5568;
-                border: 1px solid #718096; color: #e2e8f0; border-radius: 4px;
+                border: 1px solid #718096; color: #e2e8f0; border-radius: 4px; box-sizing: border-box;
+            }
+            .hp-form-group input[type="checkbox"] {
+                margin-right: 5px; vertical-align: middle;
             }
             .hp-form-group input[type="number"] { width: 100px; }
             #holodex-proxy-settings-modal button {
                 background-color: #4a5568; color: #e2e8f0; padding: 8px 15px;
                 border: 1px solid #718096; border-radius: 4px; cursor: pointer;
-                margin-right: 5px; transition: background-color 0.2s;
+                margin-right: 5px; transition: background-color 0.2s; vertical-align: middle;
             }
-            #holodex-proxy-settings-modal button:hover { background-color: #718096; }
+            #holodex-proxy-settings-modal button:disabled {
+                background-color: #3a4351;
+                color: #718096;
+                cursor: not-allowed;
+                border-color: #4a5568;
+            }
+            #holodex-proxy-settings-modal button:hover:not(:disabled) { background-color: #718096; }
             #hp-save-settings-btn, #hp-save-channel-btn { background-color: #38a169; }
-            #hp-save-settings-btn:hover, #hp-save-channel-btn:hover { background-color: #48bb78; }
+            #hp-save-settings-btn:hover:not(:disabled), #hp-save-channel-btn:hover:not(:disabled) { background-color: #48bb78; }
             #hp-delete-channel-btn { background-color: #c53030; font-size: 0.8em; padding: 4px 8px; }
-            #hp-delete-channel-btn:hover { background-color: #e53e3e; }
+            #hp-delete-channel-btn:hover:not(:disabled) { background-color: #e53e3e; }
+            .hp-refresh-channel-btn { background-color: #2b6cb0; font-size: 0.8em; padding: 4px 8px; }
+            .hp-refresh-channel-btn:hover:not(:disabled) { background-color: #4299e1; }
+            .hp-edit-channel-btn { font-size: 0.8em; padding: 4px 8px; }
             .hp-modal-buttons { margin-top: 20px; text-align: right; }
             #hp-channel-list table { border: 1px solid #4a5568; margin-top: 10px; }
-            #hp-channel-list th, #hp-channel-list td { padding: 8px; border: 1px solid #4a5568; text-align: left; }
+            #hp-channel-list th, #hp-channel-list td { padding: 8px; border: 1px solid #4a5568; text-align: left; vertical-align: middle; }
             #hp-channel-list th { background-color: #4a5568; }
-            #hp-channel-list button { font-size: 0.9em; padding: 4px 8px;}
+            #hp-channel-list td:last-child { white-space: nowrap; width: 1%; }
+            #hp-channel-list button { font-size: 0.9em; padding: 4px 8px; margin-left: 3px; margin-right: 3px; }
             #hp-add-edit-form { background-color: #4a5568; border-radius: 5px; }
             hr { border: 0; border-top: 1px solid #4a5568; margin: 20px 0; }
         `);
     }
 
-    // Register the menu command
     GM_registerMenuCommand("Holodex Proxy Settings", createSettingsModal);
-
 
     // --- Details Initialization ---
     async function initDetails() {
         let config = null;
-        
-        if (localStorage.getItem("HolodexProxyDetails")) {
-            config = JSON.parse(localStorage.getItem("HolodexProxyDetails"));
+
+        try {
+            config = await GM_getValue("HolodexProxyDetails", null);
+            console.log("[Holodex Proxy] Loaded cache from GM storage.");
+        } catch (e) {
+            console.error("[Holodex Proxy] Error reading cache from GM storage, resetting cache:", e);
+            config = null;
         }
 
         if (!config) {
-            config = {streamsData: [], channelsData: {}, lastStreamDataUpdate: 0, lastChannelDataUpdate: 0};
-            console.log("[Holodex Proxy] No cache found. Creating new cache.");
+            config = { streamsData: [], channelsData: {}, lastStreamDataUpdate: 0, lastChannelDataUpdate: 0 };
+            console.log("[Holodex Proxy] No valid cache found. Creating new cache.");
+            await saveCacheToLocalStorage(config);
         }
 
-        localStorage.setItem("HolodexProxyDetails", JSON.stringify(config));
         unsafeWindow.HolodexProxyVideoTemp = [];
         unsafeWindow.HolodexProxyDetails = config;
+        await rebuildTempVideoCache();
     }
+
+    // Helper to save cache consistently
+    async function saveCacheToLocalStorage(dataToSave = null) {
+        try {
+            const cacheData = dataToSave || unsafeWindow.HolodexProxyDetails;
+            if (cacheData) {
+                await GM_setValue("HolodexProxyDetails", cacheData);
+            }
+        } catch (e) {
+            console.error("[Holodex Proxy] Error saving cache to GM storage:", e);
+        }
+    }
+
+    // Helper to rebuild the flat temp video cache
+    async function rebuildTempVideoCache() {
+        unsafeWindow.HolodexProxyVideoTemp = [];
+        const proxyDetails = unsafeWindow.HolodexProxyDetails;
+        if (!proxyDetails || !proxyDetails.channelsData) return;
+
+        for (let key in proxyDetails.channelsData) {
+            if (proxyDetails.channelsData[key] && Array.isArray(proxyDetails.channelsData[key].videos)) {
+                // Sort and filter out invalid videos
+                proxyDetails.channelsData[key].videos.sort((a, b) => new Date(b.available_at) - new Date(a.available_at));
+                const validVideos = proxyDetails.channelsData[key].videos.filter(v => v && v.id);
+                unsafeWindow.HolodexProxyVideoTemp = unsafeWindow.HolodexProxyVideoTemp.concat(validVideos);
+            }
+        }
+
+        // Deduplicate just in case, although it shouldn't happen often with proper updates
+        const seenIds = new Set();
+        unsafeWindow.HolodexProxyVideoTemp = unsafeWindow.HolodexProxyVideoTemp.filter(video => {
+            if (!video || !video.id || seenIds.has(video.id)) return false;
+            seenIds.add(video.id);
+            return true;
+        });
+        console.log(`[Holodex Proxy] Rebuilt temporary video cache with ${unsafeWindow.HolodexProxyVideoTemp.length} videos.`);
+
+        // Save the cache after rebuilding
+        await saveCacheToLocalStorage();
+    }
+
 
     await initDetails();
     let oldXHROpen = window.XMLHttpRequest.prototype.open;
 
-    window.XMLHttpRequest.prototype.open = function(method, url, async, user, password) {
+    window.XMLHttpRequest.prototype.open = function (method, url, async, user, password) {
 
         // Only intercept requests to Holodex
         if (!url.includes('holodex.net')) {
@@ -450,11 +613,18 @@
         let customRequestToVideoId = null;
         let parsedUrl = new URL(url);
 
+        // Check if HolodexProxyDetails is loaded
+        const proxyDetails = unsafeWindow.HolodexProxyDetails;
+        if (!proxyDetails) {
+            console.warn("[Holodex Proxy] Proxy details not yet loaded, cannot intercept.");
+            return oldXHROpen.apply(this, arguments);
+        }
+
         if (parsedUrl.pathname.includes("/api/v2/channels")) {
             let channelId = parsedUrl.pathname.split("/").pop();
             if (["videos", "clips", "collabs"].includes(channelId)) channelId = parsedUrl.pathname.split("/")[(parsedUrl.pathname.split("/").length - 2)];
 
-            if (channelId in unsafeWindow.HolodexProxyDetails.channelsData) {
+            if (proxyDetails.channelsData && channelId in proxyDetails.channelsData) {
                 // Ensure this channel is actually in the *current settings*
                 const isConfiguredChannel = Object.values(ChannelInfos).some(info => info && info.youtube === channelId);
                 if (isConfiguredChannel) {
@@ -462,7 +632,7 @@
                     url = url.toString().replace(channelId, "UCp6993wxpyDPHUpavwDFqgg"); // Tokino Sora Channel ID
                     customRequestToChannelId = channelId;
                 } else {
-                    console.log(`[Holodex Proxy] Channel ${channelId} found in cache but not in current config. Ignoring.`);
+                    console.log(`[Holodex Proxy] Channel ${channelId} found in cache but not in current config. Ignoring interception.`);
                 }
             }
         }
@@ -481,7 +651,7 @@
 
         parsedUrl = new URL(url); // Re-parse the url after changing it
 
-        this.addEventListener("readystatechange", function() {
+        this.addEventListener("readystatechange", function () {
 
             if (this.readyState === 4 && this.status !== 0) {
                 let oldResponse;
@@ -496,8 +666,6 @@
                 Object.defineProperty(this, 'response', { writable: true });
                 Object.defineProperty(this, 'responseText', { writable: true });
 
-                const proxyDetails = unsafeWindow.HolodexProxyDetails;
-
                 if (parsedUrl.pathname.includes("/api/v2/users/live")) {
                     if (Array.isArray(oldResponse) && Array.isArray(proxyDetails.streamsData)) {
                         newResponse = oldResponse.concat(proxyDetails.streamsData);
@@ -510,6 +678,8 @@
                     let favData = [];
                     for (let key in ChannelInfos) {
                         const ytId = ChannelInfos[key]?.youtube;
+                        const twitchId = ChannelInfos[key]?.twitch;
+
                         // Check if data exists in the *runtime cache*
                         if (ytId && proxyDetails.channelsData && proxyDetails.channelsData[ytId]?.channelData) {
                             const channelData = proxyDetails.channelsData[ytId].channelData;
@@ -528,6 +698,25 @@
                                 group: channelData.group
                             });
                         }
+
+                        // Handle for twitch only channels
+                        if (!ytId && twitchId) {
+                            // Construct a dummy channel data for twitch only channels
+                            favData.push({
+                                id: twitchId,
+                                name: key,
+                                english_name: key,
+                                photo: ChannelInfos[key].thumbnail,
+                                type: "vtuber",
+                                subscriber_count: 0,
+                                video_count: 0,
+                                clip_count: 0,
+                                twitter: "",
+                                org: "",
+                                inactive: false,
+                                group: ""
+                            });
+                        }
                     }
 
                     newResponse = oldResponse.concat(favData);
@@ -536,7 +725,7 @@
 
                     let earliestDate = new Date();
                     let latestDate = new Date(0);
-    
+
                     for (let video of oldResponse.items) {
                         let videoDate = new Date(video.available_at);
                         earliestDate = new Date(Math.min(earliestDate, videoDate));
@@ -569,7 +758,7 @@
                     };
                 }
                 else if (customRequestToChannelId !== null || customRequestToVideoId !== null) {
-                    Object.defineProperty(this, 'status', {get: () => 200, configurable: true});
+                    Object.defineProperty(this, 'status', { get: () => 200, configurable: true });
 
                     if (parsedUrl.pathname.includes("/api/v2/channels")) {
                         if (parsedUrl.search == "") {
@@ -598,15 +787,16 @@
                             newResponse = [];
                         }
                         else if (parsedUrl.pathname.endsWith("/topic")) {
-                            newResponse = { "topic_id": null, "topic_approver_id":null };
+                            newResponse = { "topic_id": null, "topic_approver_id": null };
                         }
                         else {
                             const videoData = unsafeWindow.HolodexProxyVideoTemp.find(video => video && video.id === customRequestToVideoId);
                             if (!videoData) {
                                 console.error(`[Holodex Proxy] Video ${customRequestToVideoId} data missing in temp cache! Returning default video data.`);
-                                Object.defineProperty(this, 'status', {get: () => 404, configurable: true});
+                                Object.defineProperty(this, 'status', { get: () => 404, configurable: true });
                             }
                             else {
+                                videoData.channel = proxyDetails.channelsData[videoData.channel.id]?.channelData || null;
                                 newResponse = videoData;
                             }
                         }
@@ -623,8 +813,8 @@
     // --- Data Fetching Functions ---
     async function fetchYtVideosData(videoIds, api_key, mode = "stream") {
 
-        if (api_key === "") {
-            console.error("[Holodex Proxy] Youtube API key is not set. Skipping youtube data fetch.");
+        if (!api_key) {
+            console.error("[Holodex Proxy] Youtube API key is not set. Skipping youtube video data fetch.");
             return [];
         }
         if (!videoIds || videoIds.length === 0) return []; // Added check for empty array
@@ -636,20 +826,20 @@
 
             try {
                 const videoResponse = await fetch(videoUrl);
+                const responseText = await videoResponse.text(); // Get text first for better error logging
                 if (!videoResponse.ok) {
-                    console.error(`[Holodex Proxy] YouTube API error (${videoResponse.status}) fetching video data:`, await videoResponse.text());
+                    console.error(`[Holodex Proxy] YouTube API error (${videoResponse.status}) fetching video data chunk ${i / 50}. IDs: ${chunk.join(',')}. Response:`, responseText);
                     continue; // Skip this chunk
                 }
-                const videoData = await videoResponse.json();
+                const videoData = JSON.parse(responseText);
 
                 for (const item of videoData.items || []) {
                     const isLive = item.snippet.liveBroadcastContent;
 
-                    if (mode === "stream" && !item.liveStreamingDetails.scheduledStartTime) {
+                    if (mode === "stream" && !item.liveStreamingDetails.scheduledStartTime && isLive === "none") {
                         continue;
                     }
 
-                    // Original result structure
                     let result = {
                         id: item.id,
                         title: item.snippet.title,
@@ -672,6 +862,7 @@
                     };
 
                     if (isLive === "live" && item.liveStreamingDetails.actualStartTime) {
+                        console.log(`[Holodex Proxy] Live stream detected: ${item.id} (${item.snippet.title})`);
                         result.start_actual = item.liveStreamingDetails.actualStartTime;
                     }
                     else if (isLive === "none" && mode === "stream") {
@@ -697,33 +888,46 @@
 
                     finalResponse.push(result);
                 }
-            } catch (error) {
-                console.error(`[Holodex Proxy] Error fetching or processing video chunk ${i/50}:`, error);
+            }
+            catch (error) {
+                console.error(`[Holodex Proxy] Error fetching or processing video chunk ${i / 50} (IDs: ${chunk.join(',')}):`, error);
             }
         }
         return finalResponse;
     }
 
+
     async function checkYt(channelIds, api_key, limit = true, count = 7, mode = "stream") {
 
-        if (api_key === "") {
-            console.error("[Holodex Proxy] Youtube API key is not set. Skipping youtube data fetch.");
+        if (!api_key) {
+            console.error("[Holodex Proxy] Youtube API key is not set. Skipping youtube playlist fetch.");
             return [];
         }
         if (!channelIds || channelIds.length === 0) return [];
 
         let videoIds = [];
-        const modes = {
-            "videos": "UULF",
-            "stream": "UULV",
-            "membersonly": "UUMO",
-            "membersonlylive": "UUMV",
-            "shorts": "UUSH",
+        const modesToPlaylistPrefix = {
+            "videos": "UULF", // Regular uploads (VODs)
+            "stream": "UULV", // Seems to be live/upcoming/recent streams
+            "membersonly": "UUMO", // Members-only uploads
+            "membersonlylive": "UUMV", // Members-only live/upcoming/recent streams
+            "shorts": "UUSH", // Shorts
         };
 
+        const playlistPrefix = modesToPlaylistPrefix[mode];
+        if (!playlistPrefix) {
+            console.error(`[Holodex Proxy] Invalid mode specified for checkYt: ${mode}`);
+            return [];
+        }
+
         await Promise.all(channelIds.map(async (channelId) => {
-            console.log(`[Holodex Proxy] Fetching youtube data for ${channelId} (${mode}) with count ${count}`);
-            const playlistId = `${modes[mode]}${channelId.substring(2)}`;
+            if (!channelId || !channelId.startsWith("UC")) {
+                console.warn(`[Holodex Proxy] Invalid YouTube channel ID provided: ${channelId}. Skipping.`);
+                return;
+            }
+            const channelName = Object.keys(ChannelInfos).find(key => ChannelInfos[key]?.youtube === channelId);
+            console.log(`[Holodex Proxy] Fetching youtube data for ${channelName || channelId} (${channelId}) (${mode}) with count ${count}`);
+            const playlistId = `${playlistPrefix}${channelId.substring(2)}`;
             let nextPageToken = null;
             let fetchedCount = 0;
 
@@ -789,27 +993,30 @@
 
     function generateRandomString(length) {
         const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-        return Array.from({length}, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+        return Array.from({ length }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
     }
 
-    async function checkTwitch(channelIds) {
-         if (!channelIds || channelIds.length === 0) return [];
+    async function checkTwitch(channelInfosAndNames) {
+        if (!channelInfosAndNames || channelInfosAndNames.length === 0) return [];
 
         let finalResponse = [];
-        await Promise.all(channelIds.map(async ([channelId, channelName]) => {
-            console.log(`[Holodex Proxy] Fetching twitch data for ${channelId}`);
+        await Promise.all(channelInfosAndNames.map(async ([channelInfo, channelName]) => {
+            const twitchChannelId = channelInfo.twitch;
+            const youtubeChannelId = channelInfo?.youtube;
+            console.log(`[Holodex Proxy] Fetching twitch data for ${twitchChannelId}`);
             try {
-                const data = await GM_fetch(`https://twitch.tv/${channelId}`);
+                const data = await GM_fetch(`https://twitch.tv/${twitchChannelId}`);
                 if (!data) {
-                    console.warn(`[Holodex Proxy] No data received from Twitch scrape for ${channelId}`);
+                    console.warn(`[Holodex Proxy] No data received from Twitch scrape for ${twitchChannelId}`);
                     return;
-                 }
+                }
 
                 if (data.includes("isLiveBroadcast")) {
 
-                    const thumb_url = `https://static-cdn.jtvnw.net/previews-ttv/live_user_${channelId}-1920x1080.jpg`;
+                    const thumb_url = `https://static-cdn.jtvnw.net/previews-ttv/live_user_${twitchChannelId}-1280x720.jpg`;
                     const thumb_data = await fetch(thumb_url);
                     if (thumb_data.redirected) {
+                        console.warn(`[Holodex Proxy] ${twitchChannelId} thumbnail doesn't work. Assuming not live.`);
                         return;
                     }
 
@@ -819,9 +1026,10 @@
                         parsedData = JSON.parse(firstPart.substring(0, firstPart.indexOf("</script>")))["@graph"][0];
 
                     } catch (parseError) {
-                        console.error(`[Holodex Proxy] Error parsing Twitch JSON-LD for ${channelId}:`, parseError);
+                        console.error(`[Holodex Proxy] Error parsing Twitch JSON-LD for ${twitchChannelId}:`, parseError);
                         return;
                     }
+                    console.log(`[Holodex Proxy] Constructing twitch data for ${twitchChannelId}`);
 
                     finalResponse.push({
                         id: `hpproxy${generateRandomString(6)}`,
@@ -833,7 +1041,7 @@
                         start_scheduled: parsedData.publication.startDate,
                         start_actual: parsedData.publication.startDate,
                         channel: {
-                            id: channelId,
+                            id: youtubeChannelId || twitchChannelId,
                             name: channelName,
                             org: "Independents",
                             suborg: "",
@@ -841,258 +1049,368 @@
                             photo: "",
                             english_name: channelName,
                         },
-                        link: `https://twitch.tv/${channelId}`,
+                        link: `https://twitch.tv/${twitchChannelId}`,
                         certainty: "certain",
                         thumbnail: thumb_url,
                         placeholderType: "external-stream",
                     });
                 }
-            } catch (err) {
-                console.error(`[Holodex Proxy] Error fetching or processing Twitch data for ${channelId}:`, err);
+                else {
+                    console.warn(`[Holodex Proxy] ${twitchChannelId} isLiveBroadcast doesn't exist. Assuming not live.`);
+                }
+            }
+            catch (err) {
+                console.error(`[Holodex Proxy] Error fetching or processing Twitch data for ${twitchChannelId}:`, err);
             }
         }));
         return finalResponse;
     }
 
+    // --- Single Channel Update Logic (Extracted) ---
+    async function updateSingleChannelData(youtubeId, channelName, forceRecrawl = false) {
+        if (!youtubeId || !channelName) {
+            console.error("[Holodex Proxy] Missing youtubeId or channelName for single channel update.");
+            return;
+        }
+
+        if (!YOUTUBE_API_KEY) {
+            console.error("[Holodex Proxy] Youtube API key is not set. Cannot update channel data.");
+            return;
+        }
+
+        console.log(`[Holodex Proxy] Updating data for channel: ${channelName} (${youtubeId}), Force Recrawl Channel Data: ${forceRecrawl}`);
+        const currentTimestamp = Date.now();
+        const proxyDetails = unsafeWindow.HolodexProxyDetails;
+
+        // Initialize cache entry if needed
+        if (!(youtubeId in proxyDetails.channelsData)) {
+            proxyDetails.channelsData[youtubeId] = { channelData: {}, videos: [] };
+            console.log(`[Holodex Proxy] Initialized cache entry for ${channelName}`);
+        }
+        let currentChannelCache = proxyDetails.channelsData[youtubeId];
+
+        // --- Update Status of Existing Live/Upcoming Videos ---
+        const liveOrUpcomingVids = currentChannelCache.videos.filter(video => video && (video.status === "live" || video.status === "upcoming"));
+        if (liveOrUpcomingVids.length > 0) {
+            console.log(`[Holodex Proxy] Updating status for ${liveOrUpcomingVids.length} cached live/upcoming videos for ${channelName}`);
+            try {
+                let liveOrUpcomingVidsIds = liveOrUpcomingVids.map(video => video.id);
+                const liveOrUpcomingVidsData = await fetchYtVideosData(liveOrUpcomingVidsIds, YOUTUBE_API_KEY, "stream");
+
+                const updatedIds = new Set();
+                liveOrUpcomingVidsData.forEach(updatedVideo => {
+                    const index = currentChannelCache.videos.findIndex(v => v && v.id === updatedVideo.id);
+                    if (index !== -1) {
+                        currentChannelCache.videos[index] = updatedVideo;
+                    } else {
+                        currentChannelCache.videos.push(updatedVideo);
+                    }
+                    updatedIds.add(updatedVideo.id);
+                });
+
+                const removedIds = liveOrUpcomingVidsIds.filter(id => !updatedIds.has(id));
+                if (removedIds.length > 0) {
+                    console.log(`[Holodex Proxy] Removing ${removedIds.length} videos for ${channelName} that are no longer live/upcoming/available: ${removedIds.join(', ')}`);
+                    currentChannelCache.videos = currentChannelCache.videos.filter(v => v && !removedIds.includes(v.id));
+                    currentChannelCache.videos.sort((a, b) => new Date(b.available_at) - new Date(a.available_at));
+                }
+
+            }
+            catch (e) {
+                console.error(`[Holodex Proxy] Error updating live/upcoming video status for ${channelName}:`, e);
+            }
+        }
+
+        // --- Update Channel Details & Recrawl Videos (if forced or needed) ---
+        const shouldRecrawl = forceRecrawl || !currentChannelCache.channelData?.recrawled_at || (currentTimestamp - new Date(currentChannelCache.channelData.recrawled_at).getTime() > 1000 * 60 * 60 * 24 * 7); // Recrawl every 7 days or if forced
+
+        if (shouldRecrawl) {
+            console.log(`[Holodex Proxy] Performing full channel details update and video recrawl for ${channelName}.`);
+
+            // Fetch Channel Details
+            try {
+                console.log(`[Holodex Proxy] Fetching channel details from YouTube API for ${channelName} (${youtubeId})`);
+                let response = await fetch(`https://www.googleapis.com/youtube/v3/channels?part=contentDetails,id,snippet,statistics,brandingSettings&id=${youtubeId}&key=${YOUTUBE_API_KEY}`);
+                let data = await response.json();
+
+                if (data.items && data.items.length > 0) {
+                    currentChannelCache.channelData = {
+                        id: youtubeId,
+                        name: data.items[0].snippet.title,
+                        english_name: data.items[0].snippet.title,
+                        description: data.items[0].snippet.description || "",
+                        photo: data.items[0].snippet.thumbnails.default.url,
+                        thumbnail: null,
+                        banner: data.items[0].brandingSettings.image ? data.items[0].brandingSettings.image.bannerExternalUrl : "",
+                        org: "Independents",
+                        suborg: "",
+                        lang: null,
+                        published_at: data.items[0].snippet.publishedAt,
+                        view_count: data.items[0].statistics.viewCount,
+                        video_count: data.items[0].statistics.videoCount,
+                        subscriber_count: data.items[0].statistics.subscriberCount,
+                        comments_crawled_at: "",
+                        updated_at: new Date().toISOString(),
+                        recrawled_at: new Date().toISOString(),
+                        yt_uploads_id: data.items[0].contentDetails.relatedPlaylists.uploads,
+                        crawled_at: "",
+                        type: "vtuber",
+                        clip_count: 0,
+                        twitter: ChannelInfos[channelName].twitter || "",
+                        inactive: false,
+                        created_at: "",
+                        top_topics: [],
+                        yt_handle: [data.items[0].snippet.customUrl],
+                        twitch: ChannelInfos[channelName].twitch || null,
+                        yt_name_history: [],
+                        groups: ""
+                    };
+                    console.log(`[Holodex Proxy] Channel details updated successfully for ${channelName}.`);
+                }
+                else {
+                    console.warn(`[Holodex Proxy] No channel data returned from YouTube API for ${youtubeId}. Channel might be invalid or terminated.`);
+                    currentChannelCache.channelData.inactive = true;
+                    currentChannelCache.channelData.updated_at = new Date().toISOString();
+                    currentChannelCache.channelData.recrawled_at = new Date().toISOString(); // Mark recrawl attempt
+                }
+            }
+            catch (e) {
+                console.error(`[Holodex Proxy] Error fetching channel details for ${channelName}:`, e);
+            }
+
+            console.log(`[Holodex Proxy] Starting full video recrawl for ${channelName}. This may take time.`);
+            let newVideoFetch = [];
+            const modesToCrawl = ["stream", "videos", "membersonlylive", "membersonly", "shorts"];
+            try {
+                const approxVideoCount = parseInt(currentChannelCache.channelData.video_count || "1000", 10);
+                let currentTotalCount = 0;
+                for (const mode of modesToCrawl) {
+                    console.log(`[Holodex Proxy] Fetching ${mode} for ${channelName}...`);
+                    const videoData = await checkYt([youtubeId], YOUTUBE_API_KEY, false, approxVideoCount - currentTotalCount, mode);
+                    currentTotalCount += videoData.length;
+
+                    console.log(`[Holodex Proxy] Fetched ${videoData.length} videos for mode '${mode}' for ${channelName}.`);
+                    newVideoFetch = newVideoFetch.concat(videoData);
+                    await new Promise(r => setTimeout(r, 5000));
+                }
+
+                // Merge new videos with existing cache, deduplicate, and sort
+                let combinedVideos = currentChannelCache.videos.concat(newVideoFetch);
+                const seenVideoIds = new Set();
+                const uniqueVideos = combinedVideos.filter(video => {
+                    if (!video || !video.id || seenVideoIds.has(video.id)) {
+                        return false;
+                    }
+                    seenVideoIds.add(video.id);
+                    return true;
+                });
+
+                // Sort by available_at descending (most recent first)
+                currentChannelCache.videos = uniqueVideos.sort((a, b) => new Date(b.available_at) - new Date(a.available_at));
+                console.log(`[Holodex Proxy] Full video recrawl complete for ${channelName}. Total unique videos in cache: ${currentChannelCache.videos.length}`);
+
+            }
+            catch (e) {
+                console.error(`[Holodex Proxy] Error during full video recrawl for ${channelName}:`, e);
+            }
+        }
+        else {
+            console.log(`[Holodex Proxy] Skipping full recrawl for ${channelName} as it's not forced and was recrawled recently.`);
+        }
+
+        // --- Final Sort and Update Cache ---
+        currentChannelCache.videos = currentChannelCache.videos.sort((a, b) => new Date(b.available_at) - new Date(a.available_at));
+        unsafeWindow.HolodexProxyDetails.channelsData[youtubeId] = currentChannelCache;
+    }
+
     let updateTimeout = null;
-    async function updateData(force = false) {
+    async function updateData(force = false, onload = false) {
 
         if (updateTimeout) {
             clearTimeout(updateTimeout);
             updateTimeout = null;
         }
 
+        const scheduleNextUpdate = () => {
+            console.log(`[Holodex Proxy] Scheduling next background update check in ${DELAY_BETWEEN_UPCOMING_UPDATES / 1000} seconds.`);
+            updateTimeout = setTimeout(() => updateData(false), DELAY_BETWEEN_UPCOMING_UPDATES);
+        };
+
         const currentTimestamp = Date.now();
         const proxyDetails = unsafeWindow.HolodexProxyDetails;
 
-        // Check if cache exists, initialize if not (should be handled by initDetails already)
+        // Check if cache exists
         if (!proxyDetails) {
             console.error("[Holodex Proxy] Cache object not found during updateData!");
             await initDetails(); // Re-initialize as a fallback
-            if (!unsafeWindow.HolodexProxyDetails) return; // Stop if still fails
+            if (!unsafeWindow.HolodexProxyDetails) {
+                console.error("[Holodex Proxy] Cache initialization failed. Aborting update cycle.");
+                return; // Stop if still fails
+            }
         }
 
         // --- Upcoming/Live Update ---
-        if (force || !proxyDetails.lastStreamDataUpdate || currentTimestamp - proxyDetails.lastStreamDataUpdate > DELAY_BETWEEN_UPCOMING_UPDATES) {
-            console.log("[Holodex Proxy] Updating upcoming livestream data");
+        const timeSinceLastStreamUpdate = currentTimestamp - (proxyDetails.lastStreamDataUpdate || 0);
+        if (onload || force || timeSinceLastStreamUpdate > DELAY_BETWEEN_UPCOMING_UPDATES) {
+            console.log("[Holodex Proxy] Updating upcoming/live stream data...");
 
             // Get channels from the *runtime* ChannelInfos variable
             const ytChannels = Object.values(ChannelInfos).map(info => info?.youtube).filter(Boolean);
             const twitchChannels = Object.entries(ChannelInfos)
                 .filter(([_, info]) => info?.twitch)
-                .map(([name, info]) => [info.twitch, name]);
+                .map(([name, info]) => [info, name]);
 
             try {
-                let ytData = await checkYt(ytChannels, YOUTUBE_API_KEY); // Default mode is 'stream'
-                let ytMembersData = await checkYt(ytChannels, YOUTUBE_API_KEY, false, 7, "membersonlylive");
+                let ytUpcomingData = await checkYt(ytChannels, YOUTUBE_API_KEY);
+                let ytMembersUpcomingData = await checkYt(ytChannels, YOUTUBE_API_KEY, false, 7, "membersonlylive");
                 let twitchData = await checkTwitch(twitchChannels);
 
-                let combinedData = ytData.concat(twitchData).concat(ytMembersData);
-                let finalData = combinedData.filter(video => video && video.duration === 0);
+                let combinedData = ytUpcomingData.concat(ytMembersUpcomingData).concat(twitchData);
+                let finalData = combinedData.filter(video => video && (video.duration === 0));
 
                 unsafeWindow.HolodexProxyDetails.streamsData = finalData;
                 console.log(`[Holodex Proxy] Live/Upcoming update complete. Found ${finalData.length} items.`);
-            } catch (e) {
+            }
+            catch (e) {
                 console.error("[Holodex Proxy] Error during live/upcoming fetch:", e);
             }
-
-            unsafeWindow.HolodexProxyDetails.lastStreamDataUpdate = currentTimestamp;
-        } else {
-            const nextUpdateSec = Math.round((DELAY_BETWEEN_UPCOMING_UPDATES - (currentTimestamp - proxyDetails.lastStreamDataUpdate)) / 1000);
-            console.log(`[Holodex Proxy] Upcoming livestream data is up to date. Next check in ${nextUpdateSec} seconds`);
-        }
-
-        // --- Channel & Archive Update ---
-
-        // Remove inactive channels from cache (based on current ChannelInfos)
-        const activeYoutubeIds = new Set(Object.values(ChannelInfos).map(info => info?.youtube).filter(Boolean));
-        for (let key in proxyDetails.channelsData) {
-            if (!activeYoutubeIds.has(key)) {
-                 console.log(`[Holodex Proxy] Removing inactive channel ${key} from cache.`);
-                delete proxyDetails.channelsData[key];
+            finally {
+                unsafeWindow.HolodexProxyDetails.lastStreamDataUpdate = currentTimestamp;
             }
+
+        }
+        else {
+            const nextUpdateSec = Math.round((DELAY_BETWEEN_UPCOMING_UPDATES - timeSinceLastStreamUpdate) / 1000);
+            console.log(`[Holodex Proxy] Upcoming/live stream data is up to date. Next check in ${nextUpdateSec} seconds.`);
         }
 
-        if (force || !proxyDetails.lastChannelDataUpdate || currentTimestamp - proxyDetails.lastChannelDataUpdate > DELAY_BETWEEN_CHANNEL_DATA_UPDATES) {
-            console.log("[Holodex Proxy] Refreshing Extra details data (Channel/Archive Update Cycle)");
+        // --- Channel & Archive Update Cycle ---
+        const timeSinceLastChannelUpdateCycle = currentTimestamp - (proxyDetails.lastChannelDataUpdate || 0);
+        if (force || timeSinceLastChannelUpdateCycle > DELAY_BETWEEN_CHANNEL_DATA_UPDATES) {
+            console.log(`[Holodex Proxy] Starting channel/archive update cycle check (Force: ${force}). Cycle Interval: ${DELAY_BETWEEN_CHANNEL_DATA_UPDATES / (60 * 1000)} min.`);
+
+            // Remove inactive channels from cache (based on current ChannelInfos) before updating
+            const activeYoutubeIds = new Set(Object.values(ChannelInfos).map(info => info?.youtube).filter(Boolean));
+            let channelsRemoved = 0;
+            for (let cachedYtId in proxyDetails.channelsData) {
+                if (!activeYoutubeIds.has(cachedYtId)) {
+                    console.log(`[Holodex Proxy] Removing inactive channel ${cachedYtId} from cache.`);
+                    delete proxyDetails.channelsData[cachedYtId];
+                    channelsRemoved++;
+                }
+            }
+
+            if (channelsRemoved > 0) {
+                console.log(`[Holodex Proxy] Removed ${channelsRemoved} inactive channels from cache.`);
+                await rebuildTempVideoCache(); // Rebuild flat cache if channels were removed
+            }
 
             let channelUpdatedThisCycle = false; // Track if any channel was updated this cycle
 
             // Iterate through the *runtime* ChannelInfos
-            for (let key in ChannelInfos) {
-                if (UpdateOneChannelAtATime && channelUpdatedThisCycle) {
-                    break; // Only update one channel per cycle if set
-                }
+            const channelNames = Object.keys(ChannelInfos);
+            for (const channelName of channelNames) {
 
-                let youtubeKey = ChannelInfos[key]?.youtube;
-                if (!youtubeKey) {
+                const youtubeId = ChannelInfos[channelName]?.youtube;
+                if (!youtubeId) {
                     continue;
                 }
 
-                console.log(`[Holodex Proxy] Checking channel data for ${key} (${youtubeKey})`);
-
-                // Initialize cache entry if needed
-                if (!(youtubeKey in proxyDetails.channelsData)) {
-                    proxyDetails.channelsData[youtubeKey] = { channelData: {}, videos: [] };
+                if (UpdateOneChannelAtATime && !force && channelUpdatedThisCycle) {
+                    console.log("[Holodex Proxy] 'Update One Channel at a Time' is enabled, stopping cycle after one update.");
+                    break;
                 }
-                let currentChannel = proxyDetails.channelsData[youtubeKey];
 
-                // Only update a channel every 24 hours
-                if (currentChannel.channelData?.updated_at && currentTimestamp - new Date(currentChannel.channelData.updated_at).getTime() < 1000 * 60 * 60 * 24) {
-                    console.log(`[Holodex Proxy] Channel ${key} (${youtubeKey}) is up to date. Skipping.`);
-                    continue;
-                }
-                currentChannel.channelData.updated_at = new Date().toISOString(); // Update timestamp
+                console.log(`[Holodex Proxy] Checking channel ${channelName} (${youtubeId}) for updates...`);
 
-                // Update existing live/upcoming videos in cache
-                const liveOrUpcomingVids = currentChannel.videos.filter(video => video && (video.status === "live" || video.status === "upcoming"));
-                if (liveOrUpcomingVids.length > 0) {
-                    console.log(`[Holodex Proxy] Updating status for ${liveOrUpcomingVids.length} cached live/upcoming videos for ${key}`);
+                // Check individual channel's last update time *within its cache entry*
+                const channelCache = proxyDetails.channelsData[youtubeId];
+                const lastChannelRecrawlTime = channelCache?.channelData?.recrawled_at ? new Date(channelCache.channelData.recrawled_at).getTime() : 0;
+                const needsUpdate = !lastChannelRecrawlTime || (currentTimestamp - lastChannelRecrawlTime > 1000 * 60 * 60 * 24 * 7); // Needs update if never crawled or older than 7 days
+
+                // If forced, update regardless of time. If not forced, update only if needed.
+                if (force || needsUpdate) {
                     try {
-                        let liveOrUpcomingVidsIds = liveOrUpcomingVids.map(video => video.id);
-                        const liveOrUpcomingVidsData = await fetchYtVideosData(liveOrUpcomingVidsIds, YOUTUBE_API_KEY, "stream");
-
-                        liveOrUpcomingVidsData.forEach(video => {
-                            console.log(`[Holodex Proxy] Updating video ${video.id} from ${video.channel.id} (${video.channel.name})`);
-                            const index = currentChannel.videos.findIndex(v => v && v.id === video.id);
-                            if (index !== -1) {
-                                currentChannel.videos[index] = video;
-                            }
-                            else {
-                                currentChannel.videos.push(video);
-                            }
-                            liveOrUpcomingVidsIds = liveOrUpcomingVidsIds.filter(id => id !== video.id);
-                        });
-
-                        // Remove any videos that are no longer live/upcoming
-                        currentChannel.videos = currentChannel.videos.filter(v => v && !liveOrUpcomingVidsIds.includes(v.id));
-                        currentChannel.videos = currentChannel.videos.sort((a, b) => new Date(b.available_at) - new Date(a.available_at));
+                        // Use the separated function. Pass `force` to ensure recrawl happens if `force` is true.
+                        await updateSingleChannelData(youtubeId, channelName, force || needsUpdate);
                         channelUpdatedThisCycle = true;
+                        if (channelNames.length > 1) {
+                            await new Promise(r => setTimeout(r, 2000));
+                        }
                     }
                     catch (e) {
-                        console.error(`[Holodex Proxy] Error updating live/upcoming video status for ${key}:`, e);
+                        console.error(`[Holodex Proxy] Error in update cycle for channel ${channelName}:`, e);
                     }
                 }
-
-                unsafeWindow.HolodexProxyDetails.channelsData[youtubeKey] = currentChannel;
-
-                // Only recrawl everything every 7 days
-                if (currentChannel.channelData?.recrawled_at && currentTimestamp - new Date(currentChannel.channelData.recrawled_at).getTime() < 1000 * 60 * 60 * 24 * 7) {
-                    console.log(`[Holodex Proxy] Channel ${key} (${youtubeKey}) is up to date. Skipping.`);
-                    continue;
-                }
-
-                console.log(`[Holodex Proxy] Channel ${key} (${youtubeKey}) probably needs full recrawl.`);
-
-                try {
-                    let response = await fetch(`https://www.googleapis.com/youtube/v3/channels?part=contentDetails,id,snippet,statistics,brandingSettings&id=${youtubeKey}&key=${YOUTUBE_API_KEY}`);
-                    let data = await response.json();
-                    if (data.items && data.items.length > 0) {
-                        currentChannel.channelData = {
-                            id: youtubeKey,
-                            name: data.items[0].snippet.title,
-                            english_name: data.items[0].snippet.title,
-                            description: data.items[0].snippet.description,
-                            photo: data.items[0].snippet.thumbnails.default.url,
-                            thumbnail: null,
-                            banner: data.items[0].brandingSettings.image ? data.items[0].brandingSettings.image.bannerExternalUrl : "",
-                            org: "Independents",
-                            suborg: "",
-                            lang: null,
-                            published_at: data.items[0].snippet.publishedAt,
-                            view_count: data.items[0].statistics.viewCount,
-                            video_count: data.items[0].statistics.videoCount,
-                            subscriber_count: data.items[0].statistics.subscriberCount,
-                            comments_crawled_at: "",
-                            updated_at: new Date().toISOString(),
-                            recrawled_at: new Date().toISOString(),
-                            yt_uploads_id: data.items[0].contentDetails.relatedPlaylists.uploads,
-                            crawled_at: "",
-                            type: "vtuber",
-                            clip_count: 0,
-                            twitter: ChannelInfos[key].twitter || "",
-                            inactive: false,
-                            created_at: "",
-                            top_topics: [],
-                            yt_handle: [data.items[0].snippet.customUrl],
-                            twitch: ChannelInfos[key].twitch || null,
-                            yt_name_history: [],
-                            groups: ""
-                        };
-                        console.log(`[Holodex Proxy] Channel details updated for ${key}.`);
+                else {
+                    console.log(`[Holodex Proxy] Channel ${channelName} (${youtubeId}) archive data hasn't passed 24 hours yet. Skipping update in this cycle.`);
+                    // Still update the live/upcoming status for this channel even if not recrawling
+                    try {
+                        await updateSingleChannelData(youtubeId, channelName, false);
                     }
-                    else {
-                        console.warn(`[Holodex Proxy] No channel data returned for ${youtubeKey}`);
+                    catch (e) {
+                        console.error(`[Holodex Proxy] Error updating live/upcoming status for ${channelName}:`, e);
                     }
                 }
-                catch (e) {
-                    console.error(`[Holodex Proxy] Error fetching channel details for ${key}:`, e);
-                }
-
-                try {
-                    const modes = ["videos", "stream", "membersonly", "shorts"];
-                    let currentCount = 0;
-                    for (const mode of modes) {
-                        const videoData = await checkYt([youtubeKey], YOUTUBE_API_KEY, false, currentChannel.channelData.video_count - currentCount, mode);
-                        currentCount += videoData.length;
-                        currentChannel.videos = videoData.concat(currentChannel.videos);
-                        currentChannel.videos = currentChannel.videos.filter((video, index, self) => self.findIndex(v => v.id === video.id) === index);
-                        await new Promise(r => setTimeout(r, 5000));
-                    }
-                    console.log(`[Holodex Proxy] Full video recrawl complete for ${key}. Total videos: ${currentChannel.videos.length}`);
-                } 
-                catch (e) {
-                    console.error(`[Holodex Proxy] Error during full video recrawl for ${key}:`, e);
-                }
-
-                currentChannel.videos = currentChannel.videos.sort((a, b) => new Date(b.available_at) - new Date(a.available_at));
-                unsafeWindow.HolodexProxyDetails.channelsData[youtubeKey] = currentChannel;
-
-                channelUpdatedThisCycle = true;
             }
 
             unsafeWindow.HolodexProxyDetails.lastChannelDataUpdate = currentTimestamp;
-            localStorage.setItem("HolodexProxyDetails", JSON.stringify(proxyDetails));
-            console.log("[Holodex Proxy] Channel/archive data update complete.");
-        } 
-        else {
-            const nextUpdateMin = Math.round((DELAY_BETWEEN_CHANNEL_DATA_UPDATES - (currentTimestamp - proxyDetails.lastChannelDataUpdate)) / (1000 * 60));
-            console.log(`[Holodex Proxy] Channel/archive data is up to date. Next check in ${nextUpdateMin} minutes.`);
+            console.log("[Holodex Proxy] Channel/archive data update cycle finished.");
+
         }
-
-        for (let video of unsafeWindow.HolodexProxyDetails.streamsData) {
-            if (!video.channel.id.startsWith("UC")) continue;
-            console.log(`[Holodex Proxy] Updating video data for ${video.id} from ${video.channel.id} (${video.channel.name})`);
-
-            if (!(video.channel.id in unsafeWindow.HolodexProxyDetails.channelsData)) {
-                unsafeWindow.HolodexProxyDetails.channelsData[video.channel.id] = {
-                    channelData: {},
-                    videos: []
+        else {
+            const nextUpdateMin = Math.round((DELAY_BETWEEN_CHANNEL_DATA_UPDATES - timeSinceLastChannelUpdateCycle) / (1000 * 60));
+            console.log(`[Holodex Proxy] Channel/archive data update cycle not due yet. Next check in ${nextUpdateMin} minutes.`);
+            console.log("[Holodex Proxy] Performing quick status update for live/upcoming videos in channel caches...");
+            for (const channelName in ChannelInfos) {
+                const youtubeId = ChannelInfos[channelName]?.youtube;
+                if (youtubeId && proxyDetails.channelsData[youtubeId]) {
+                    try {
+                        await updateSingleChannelData(youtubeId, channelName, false);
+                    }
+                    catch (e) {
+                        console.error(`[Holodex Proxy] Error during quick status update for ${channelName}:`, e);
+                    }
                 }
             }
+            console.log("[Holodex Proxy] Quick status update finished.");
+        }
 
-            const index = unsafeWindow.HolodexProxyDetails.channelsData[video.channel.id].videos.findIndex(v => v.id === video.id);
+        // --- Final Cache Consolidation ---
+        // Ensure any newly fetched live/upcoming streams are reflected in the channel's video list
+        for (let liveVideo of unsafeWindow.HolodexProxyDetails.streamsData) {
+            if (!liveVideo.channel || !liveVideo.channel.id || !liveVideo.channel.id.startsWith("UC")) continue;
+
+            const channelId = liveVideo.channel.id;
+            if (!proxyDetails.channelsData[channelId]) {
+                console.warn(`[Holodex Proxy] Channel ${channelId} not found in cache. Initializing new entry.`);
+                proxyDetails.channelsData[channelId] = { channelData: {}, videos: [] };
+            }
+            const channelVidCache = unsafeWindow.HolodexProxyDetails.channelsData[channelId].videos;
+            const index = channelVidCache.findIndex(v => v && v.id === liveVideo.id);
             if (index !== -1) {
-                unsafeWindow.HolodexProxyDetails.channelsData[video.channel.id].videos[index] = video;
+                channelVidCache[index] = liveVideo;
             }
             else {
-                unsafeWindow.HolodexProxyDetails.channelsData[video.channel.id].videos.push(video);
+                channelVidCache.push(liveVideo);
+                channelVidCache.sort((a, b) => new Date(b.available_at) - new Date(a.available_at));
             }
         }
 
-        unsafeWindow.HolodexProxyVideoTemp = [];
-        for (let key in unsafeWindow.HolodexProxyDetails.channelsData) {
-            unsafeWindow.HolodexProxyDetails.channelsData[key].videos = unsafeWindow.HolodexProxyDetails.channelsData[key].videos.sort((a, b) => new Date(b.available_at) - new Date(a.available_at));
-            unsafeWindow.HolodexProxyVideoTemp = unsafeWindow.HolodexProxyVideoTemp.concat(unsafeWindow.HolodexProxyDetails.channelsData[key].videos);
-        }
-        localStorage.setItem("HolodexProxyDetails", JSON.stringify(unsafeWindow.HolodexProxyDetails));
-        console.log(`[Holodex Proxy] Scheduling next update check in ${DELAY_BETWEEN_UPCOMING_UPDATES / 1000} seconds.`);
-        updateTimeout = setTimeout(() => updateData(false), DELAY_BETWEEN_UPCOMING_UPDATES);
+        // Rebuild the flat temporary video cache from the updated channel data
+        await rebuildTempVideoCache();
+
+        // Save the entire updated cache to storage
+        await saveCacheToLocalStorage();
+
+        // Schedule the next background check
+        scheduleNextUpdate();
     }
+
 
     // --- Thumbnail Replacement Logic ---
     function transform(img) {
-        if (!img || !img.src) return;
+        if (!img || !img.src || !img.src.includes('/statics/channelImg/')) return;
 
         const imgSrcParts = img.src.split("/statics/channelImg/");
         if (imgSrcParts.length < 2) {
@@ -1134,6 +1452,6 @@
 
     // --- Initial Data Update Trigger ---
     console.log("[Holodex Proxy] Initializing...");
-    updateData(true); // Force update on first run
+    updateData(false, true);
 
 })();
