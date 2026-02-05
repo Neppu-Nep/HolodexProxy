@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Custom Holodex Proxy
-// @version      0.7.2
+// @version      0.7.3
 // @description  Proxy for Holodex to add user-specified channels from youtube and twitch
 // @author       Nep
 // @connect      twitch.tv
@@ -185,6 +185,10 @@
         const importBtn = modal.querySelector('#hp-import-settings-btn');
         const importFileInput = modal.querySelector('#hp-import-file-input');
 
+        // State for pagination and sorting
+        let currentPage = 1;
+        const ITEMS_PER_PAGE = 10;
+        let sortDirection = null; // null (default), 'asc', 'desc'
 
         function renderModalChannelList() {
             if (!listDiv) return;
@@ -195,23 +199,53 @@
                 return;
             }
 
+            let keys = Object.keys(modalChannelInfos);
+            if (sortDirection === 'asc') {
+                keys.sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+            }
+            else if (sortDirection === 'desc') {
+                keys.sort((a, b) => b.toLowerCase().localeCompare(a.toLowerCase()));
+            }
+            // If sortDirection is null, we use the original order of keys
+
+            const totalItems = keys.length;
+            const totalPages = Math.ceil(totalItems / ITEMS_PER_PAGE);
+
+            // Ensure currentPage is valid
+            if (currentPage > totalPages) currentPage = totalPages;
+            if (currentPage < 1) currentPage = 1;
+
+            const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+            const endIndex = startIndex + ITEMS_PER_PAGE;
+            const pageKeys = keys.slice(startIndex, endIndex);
+
             const table = document.createElement('table');
             table.style.width = '100%';
             table.style.borderCollapse = 'collapse';
+
+            // Sort indicator text
+            let sortIndicator = '';
+            if (sortDirection === 'asc') {
+                sortIndicator = ' ▲';
+            }
+            if (sortDirection === 'desc') {
+                sortIndicator = ' ▼';
+            }
+
             table.innerHTML = `
                 <thead>
                     <tr>
-                        <th>Name</th>
-                        <th>Twitter</th>
-                        <th>YouTube</th>
-                        <th>Twitch</th>
-                        <th>Actions</th>
+                        <th id="hp-sort-name-header" style="cursor: pointer; user-select: none; width: 30%;">Name${sortIndicator}</th>
+                        <th style="width: 20%;">Twitter</th>
+                        <th style="width: 25%;">YouTube</th>
+                        <th style="width: 20%;">Twitch</th>
+                        <th style="width: 5%; white-space: nowrap;">Actions</th>
                     </tr>
                 </thead>
                 <tbody></tbody>`;
 
             const tbody = table.querySelector('tbody');
-            for (const name in modalChannelInfos) {
+            for (const name of pageKeys) {
                 const info = modalChannelInfos[name];
                 const youtubeId = info.youtube || null;
                 const tr = document.createElement('tr');
@@ -230,7 +264,45 @@
             }
             listDiv.appendChild(table);
 
-            // Add event listeners for buttons within this modal's scope
+            if (totalPages > 1) {
+                const paginationDiv = document.createElement('div');
+                paginationDiv.style.marginTop = '10px';
+                paginationDiv.style.textAlign = 'center';
+                paginationDiv.innerHTML = `
+                    <button type="button" id="hp-prev-page" ${currentPage === 1 ? 'disabled' : ''}>Previous</button>
+                    <span style="margin: 0 10px;">Page ${currentPage} of ${totalPages}</span>
+                    <button type="button" id="hp-next-page" ${currentPage === totalPages ? 'disabled' : ''}>Next</button>
+                `;
+                listDiv.appendChild(paginationDiv);
+
+                paginationDiv.querySelector('#hp-prev-page').addEventListener('click', () => {
+                    if (currentPage > 1) {
+                        currentPage--;
+                        renderModalChannelList();
+                    }
+                });
+
+                paginationDiv.querySelector('#hp-next-page').addEventListener('click', () => {
+                    if (currentPage < totalPages) {
+                        currentPage++;
+                        renderModalChannelList();
+                    }
+                });
+            }
+
+            table.querySelector('#hp-sort-name-header').addEventListener('click', () => {
+                if (sortDirection === null) {
+                    sortDirection = 'asc';
+                }
+                else if (sortDirection === 'asc') {
+                    sortDirection = 'desc';
+                }
+                else {
+                    sortDirection = null;
+                }
+                renderModalChannelList();
+            });
+
             listDiv.querySelectorAll('.hp-refresh-channel-btn').forEach(btn => {
                 btn.addEventListener('click', () => handleForceRefreshClick(btn));
             });
@@ -461,7 +533,7 @@
                     }
 
                     alert("Settings loaded from file! Review them and click 'Save & Apply Settings' to persist.");
-                } 
+                }
                 catch (err) {
                     console.error("[Holodex Proxy] Import Error:", err);
                     alert("Failed to import settings. Invalid JSON file.");
