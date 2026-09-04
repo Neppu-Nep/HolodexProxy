@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Custom Holodex Proxy
-// @version      0.7.3
+// @version      0.7.4
 // @description  Proxy for Holodex to add user-specified channels from youtube and twitch
 // @author       Nep
 // @connect      twitch.tv
@@ -1095,23 +1095,38 @@
                     let parsedData;
                     try {
                         let firstPart = data.substring(data.indexOf('<script type="application/ld+json">') + 35);
-                        parsedData = JSON.parse(firstPart.substring(0, firstPart.indexOf("</script>")))["@graph"][0];
+                        const ldJson = JSON.parse(firstPart.substring(0, firstPart.indexOf("</script>")));
+                        let graph = ldJson["@graph"];
+                        if (!Array.isArray(graph)) graph = graph ? [graph] : [];
+                        parsedData = graph.find((n) => n?.publication?.isLiveBroadcast === true)
+                            || graph.find((n) => n?.["@type"] === "VideoObject" && n?.publication?.startDate);
 
                     } catch (parseError) {
                         console.error(`[Holodex Proxy] Error parsing Twitch JSON-LD for ${twitchChannelId}:`, parseError);
+                        return;
+                    }
+
+                    if (!parsedData?.publication?.startDate) {
+                        console.warn(`[Holodex Proxy] ${twitchChannelId} live node not found in JSON-LD. Assuming not live.`);
+                        return;
+                    }
+                    const liveStartDate = parsedData.publication.startDate || parsedData.uploadDate;
+                    const liveTitle = parsedData.description || parsedData.name || `${twitchChannelId} live`;
+                    if (!liveStartDate) {
+                        console.warn(`[Holodex Proxy] ${twitchChannelId} live start date missing. Assuming not live.`);
                         return;
                     }
                     console.log(`[Holodex Proxy] Constructing twitch data for ${twitchChannelId}`);
 
                     finalResponse.push({
                         id: `hpproxy${generateRandomString(6)}`,
-                        title: parsedData.description,
+                        title: liveTitle,
                         type: "placeholder",
-                        available_at: parsedData.publication.startDate,
+                        available_at: liveStartDate,
                         duration: 0,
                         status: "live",
-                        start_scheduled: parsedData.publication.startDate,
-                        start_actual: parsedData.publication.startDate,
+                        start_scheduled: liveStartDate,
+                        start_actual: liveStartDate,
                         channel: {
                             id: youtubeChannelId || twitchChannelId,
                             name: channelName,
