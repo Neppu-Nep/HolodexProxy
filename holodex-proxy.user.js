@@ -20,6 +20,17 @@
 (async function () {
     'use strict';
 
+    // --- Coexistence Guard ---
+    // Only one Holodex Proxy build (Stable, or the Dev build from the dev
+    // branch) may run per page: two instances would double-patch
+    // XMLHttpRequest and overwrite each other's shared page-window caches.
+    // First to load wins; any later instance stands down.
+    if (unsafeWindow.HolodexProxyLoaded) {
+        console.warn("[Holodex Proxy] Another Holodex Proxy build is already running on this page. Standing down.");
+        return;
+    }
+    unsafeWindow.HolodexProxyLoaded = "stable";
+
     // --- Default Configuration (Used if no settings saved) ---
     const DEFAULT_SETTINGS = {
         youtubeApiKey: "", // YouTube Data API v3 Key
