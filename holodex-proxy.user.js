@@ -1,6 +1,6 @@
 // ==UserScript==
-// @name         Custom Holodex Proxy
-// @version      0.7.4
+// @name         Custom Holodex Proxy (Dev)
+// @version      0.7.4-dev.1
 // @description  Proxy for Holodex to add user-specified channels from youtube and twitch
 // @author       Nep
 // @connect      twitch.tv
@@ -12,8 +12,8 @@
 // @grant        GM_getValue
 // @grant        GM_registerMenuCommand
 // @grant        GM_addStyle
-// @updateURL    https://raw.githubusercontent.com/Neppu-Nep/HolodexProxy/refs/heads/main/holodex-proxy.user.js
-// @downloadURL  https://raw.githubusercontent.com/Neppu-Nep/HolodexProxy/refs/heads/main/holodex-proxy.user.js
+// @updateURL    https://raw.githubusercontent.com/Neppu-Nep/HolodexProxy/refs/heads/dev/holodex-proxy.user.js
+// @downloadURL  https://raw.githubusercontent.com/Neppu-Nep/HolodexProxy/refs/heads/dev/holodex-proxy.user.js
 // @run-at       document-start
 // ==/UserScript==
 
@@ -26,10 +26,10 @@
     // XMLHttpRequest and overwrite each other's shared page-window caches.
     // First to load wins; any later instance stands down.
     if (unsafeWindow.HolodexProxyLoaded) {
-        console.warn("[Holodex Proxy] Another Holodex Proxy build is already running on this page. Standing down.");
+        console.warn("[Holodex Proxy (Dev)] Another Holodex Proxy build (Stable or Dev) is already running on this page. Disable it in your userscript manager to test the Dev build. Standing down.");
         return;
     }
-    unsafeWindow.HolodexProxyLoaded = "stable";
+    unsafeWindow.HolodexProxyLoaded = "dev";
 
     // --- Default Configuration (Used if no settings saved) ---
     const DEFAULT_SETTINGS = {
@@ -102,7 +102,7 @@
         modal.innerHTML = `
             <div class="hp-modal-content">
                 <span class="hp-close-btn">×</span>
-                <h2>Holodex Proxy Settings</h2>
+                <h2>Holodex Proxy Settings (Dev)</h2>
 
                 <div class="hp-form-group">
                     <label for="hp-api-key">YouTube Data API v3 Key:</label>
@@ -616,7 +616,7 @@
         `);
     }
 
-    GM_registerMenuCommand("Holodex Proxy Settings", createSettingsModal);
+    GM_registerMenuCommand("Holodex Proxy Settings (Dev)", createSettingsModal);
 
     // --- Details Initialization ---
     async function initDetails() {
